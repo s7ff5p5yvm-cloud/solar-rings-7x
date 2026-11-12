@@ -6,7 +6,7 @@
         entry="SolarRings7XApp"
         name="@Strings.AppName"
         launcherIcon="@Drawables.LauncherIcon"
-        version="2.2.0"
+        version="2.3.0"
         minSdkVersion="5.0.0">
         <iq:products>
             <iq:product id="fenix7xpro"/>
