@@ -113,7 +113,7 @@ function readField(id, info, w) {
     if (id == 2) {
         x = info.steps;
         goal = info.stepGoal;
-        return ["KROKI", x == null ? "--" : (x < 100000 ? x.toString() : compact(x)), (x != null && goal != null && goal > 0) ? x.toFloat() / goal : null];
+        return ["KROKI", x == null ? "--" : (x < 1000000 ? x.toString() : compact(x)), (x != null && goal != null && goal > 0) ? x.toFloat() / goal : null];
     }
     if (id == 3) {
         x = sampleValue(3);

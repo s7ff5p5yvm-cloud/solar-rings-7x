@@ -9,10 +9,10 @@
   <property id="bottomMain" type="number">16</property>
   <property id="bottomMini" type="number">17</property>
   <property id="ringColor1" type="number">0</property>
-  <property id="ringColor2" type="number">1</property>
+  <property id="ringColor2" type="number">2</property>
   <property id="ringColor3" type="number">6</property>
   <property id="ringColor4" type="number">3</property>
-  <property id="alertOn" type="boolean">true</property>
+  <property id="alertOn" type="boolean">false</property>
   <property id="alertDrop" type="number">4</property>
   <property id="altFilter" type="number">20</property>
 </properties>

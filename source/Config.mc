@@ -20,14 +20,19 @@ function saveSetting(key, value) {
 }
 
 function migrateOldSettings() {
+    // v2.5 fixes ambiguous storm/battery lightning. Reset old storm option once.
+    if (Storage.getValue("stormResetV25") != true) {
+        Properties.setValue("alertOn", false);
+        Storage.setValue("stormResetV25", true);
+    }
     if (Storage.getValue("mobileSettingsMigrationV1") == true) { return; }
     var keys = [
         "top1", "top2", "topMid", "ring1", "ring2", "ring3", "ring4",
         "bottomMain", "bottomMini", "ringColor1", "ringColor2",
-        "ringColor3", "ringColor4", "alertOn", "alertDrop", "altFilter"
+        "ringColor3", "ringColor4", "alertDrop", "altFilter"
     ];
     // Never overwrite a setting that is already set in the phone app.
-    var defaults = [14, 15, 34, 1, 2, 3, 4, 16, 17, 0, 1, 6, 3, true, 4, 20];
+    var defaults = [14, 15, 34, 1, 2, 3, 4, 16, 17, 0, 1, 6, 3, 4, 20];
     for (var i = 0; i < keys.size(); i++) {
         var oldValue = Storage.getValue(keys[i]);
         if (oldValue != null) {
@@ -97,7 +102,7 @@ function makeSettingsMenu() {
     addSetting(menu, "Kolor kola 2", "ringColor2", 1);
     addSetting(menu, "Kolor kola 3", "ringColor3", 6);
     addSetting(menu, "Kolor kola 4", "ringColor4", 3);
-    addSetting(menu, "Burza: ikona", "alertOn", true);
+    addSetting(menu, "Burza: ikona", "alertOn", false);
     addSetting(menu, "Burza: spadek", "alertDrop", 4);
     addSetting(menu, "Filtr wysokosci", "altFilter", 20);
     return menu;
@@ -114,7 +119,7 @@ class SolarSettingsDelegate extends Ui.Menu2InputDelegate {
         var key = item.getId();
         var index = _menu.findItemById(key);
         if (key == "alertOn") {
-            var next = !setting("alertOn", true);
+            var next = !setting("alertOn", false);
             saveSetting("alertOn", next);
             item.setSubLabel(optionLabel(key, next));
             _menu.updateItem(item, index);

@@ -9,313 +9,277 @@ using Toybox.ActivityMonitor as Monitor;
 
 class SolarRings7XApp extends Application.AppBase {
     function initialize() { AppBase.initialize(); }
-
     function onStart(state) {
         AppBase.onStart(state);
         migrateOldSettings();
     }
-
     function getInitialView() { return [new SolarRings7XFace()]; }
-
-    // On-watch configuration; phone configuration is resources/settings.xml.
     function getSettingsView() {
-        var menu = makeSettingsMenu();
-        return [menu, new SolarSettingsDelegate(menu)];
+        var m = makeSettingsMenu();
+        return [m, new SolarSettingsDelegate(m)];
     }
-
     function onSettingsChanged() { Ui.requestUpdate(); }
 }
 
+// EXACT 280x280 layout. No Graphics.FONT_* on the face: all text uses
+// fixed 3x5 pixel glyphs. Measured, nonoverlapping bounding boxes:
+// time/date 25-60, sun fields 77-101, rings 117-230,
+// weather 240-251, battery 256-268.
 class SolarRings7XFace extends Ui.WatchFace {
     var _storm;
-
     function initialize() {
         WatchFace.initialize();
         _storm = new StormGuard();
     }
 
-    // Always keep text within an explicitly allocated width.
-    // The smallest standard font is used only when necessary.
-    function drawFitted(dc, x, y, value, maxW, font1, font2, color) {
-        var textValue = value;
-        var font = font1;
-        if (dc.getTextWidthInPixels(textValue, font) > maxW) { font = font2; }
-        if (dc.getTextWidthInPixels(textValue, font) > maxW) { font = Gfx.FONT_XTINY; }
-        var cut = false;
-        while (textValue.length() > 2 && dc.getTextWidthInPixels(textValue, font) > maxW) {
-            textValue = textValue.substring(0, textValue.length() - 1);
-            cut = true;
+    function glyph(ch) {
+        if (ch == "0") { return ["111","101","101","101","111"]; }
+        if (ch == "1") { return ["010","110","010","010","111"]; }
+        if (ch == "2") { return ["111","001","111","100","111"]; }
+        if (ch == "3") { return ["111","001","111","001","111"]; }
+        if (ch == "4") { return ["101","101","111","001","001"]; }
+        if (ch == "5") { return ["111","100","111","001","111"]; }
+        if (ch == "6") { return ["111","100","111","101","111"]; }
+        if (ch == "7") { return ["111","001","001","001","001"]; }
+        if (ch == "8") { return ["111","101","111","101","111"]; }
+        if (ch == "9") { return ["111","101","111","001","111"]; }
+        if (ch == ":") { return ["000","010","000","010","000"]; }
+        if (ch == ".") { return ["000","000","000","000","010"]; }
+        if (ch == "-") { return ["000","000","111","000","000"]; }
+        if (ch == "/") { return ["001","001","010","100","100"]; }
+        if (ch == "%") { return ["101","001","010","100","101"]; }
+        if (ch == "+") { return ["000","010","111","010","000"]; }
+        if (ch == " ") { return ["000","000","000","000","000"]; }
+        if (ch == "A" || ch == "a") { return ["010","101","111","101","101"]; }
+        if (ch == "B" || ch == "b") { return ["110","101","110","101","110"]; }
+        if (ch == "C" || ch == "c") { return ["011","100","100","100","011"]; }
+        if (ch == "D" || ch == "d") { return ["110","101","101","101","110"]; }
+        if (ch == "E" || ch == "e") { return ["111","100","110","100","111"]; }
+        if (ch == "F" || ch == "f") { return ["111","100","110","100","100"]; }
+        if (ch == "G" || ch == "g") { return ["011","100","101","101","011"]; }
+        if (ch == "H" || ch == "h") { return ["101","101","111","101","101"]; }
+        if (ch == "I" || ch == "i") { return ["111","010","010","010","111"]; }
+        if (ch == "J" || ch == "j") { return ["001","001","001","101","010"]; }
+        if (ch == "K" || ch == "k") { return ["101","101","110","101","101"]; }
+        if (ch == "L" || ch == "l") { return ["100","100","100","100","111"]; }
+        if (ch == "M" || ch == "m") { return ["101","111","111","101","101"]; }
+        if (ch == "N" || ch == "n") { return ["101","111","111","111","101"]; }
+        if (ch == "O" || ch == "o") { return ["010","101","101","101","010"]; }
+        if (ch == "P" || ch == "p") { return ["110","101","110","100","100"]; }
+        if (ch == "Q" || ch == "q") { return ["010","101","101","111","011"]; }
+        if (ch == "R" || ch == "r") { return ["110","101","110","101","101"]; }
+        if (ch == "S" || ch == "s") { return ["011","100","010","001","110"]; }
+        if (ch == "T" || ch == "t") { return ["111","010","010","010","010"]; }
+        if (ch == "U" || ch == "u") { return ["101","101","101","101","111"]; }
+        if (ch == "V" || ch == "v") { return ["101","101","101","101","010"]; }
+        if (ch == "W" || ch == "w") { return ["101","101","111","111","101"]; }
+        if (ch == "X" || ch == "x") { return ["101","101","010","101","101"]; }
+        if (ch == "Y" || ch == "y") { return ["101","101","010","010","010"]; }
+        if (ch == "Z" || ch == "z") { return ["111","001","010","100","111"]; }
+        return ["000","000","000","000","000"];
+    }
+
+    // This renderer NEVER draws beyond the declared width or height.
+    // A 6-digit value remains visible in a 48px ring at scale=2 (46px).
+    function pixelText(dc, centerX, topY, value, width, preferredScale, color) {
+        if (value == null) { return; }
+        var label = value.toString();
+        var n = label.length();
+        var scale = preferredScale;
+        if (scale < 1) { scale = 1; }
+        while (scale > 1 && (n * 4 - 1) * scale > width) { scale--; }
+        while (label.length() > 1 && (label.length() * 4 - 1) * scale > width) {
+            label = label.substring(0, label.length() - 1);
         }
-        if (cut && textValue.length() > 2) {
-            textValue = textValue.substring(0, textValue.length() - 1) + ".";
-        }
+        var lengthPx = (label.length() * 4 - 1) * scale;
+        var left = centerX - (lengthPx / 2).toNumber();
         dc.setColor(color, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(x, y, font, textValue, Gfx.TEXT_JUSTIFY_CENTER);
-    }
-
-    function separator(dc, x1, x2, y) {
-        dc.setColor(0x666666, Gfx.COLOR_TRANSPARENT);
-        dc.setPenWidth(1);
-        dc.drawLine(x1, y, x2, y);
-    }
-
-    function drawSun(dc, x, y, rising) {
-        dc.setColor(rising ? Gfx.COLOR_YELLOW : Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawArc(x, y, 5, Gfx.ARC_COUNTER_CLOCKWISE, 0, 180);
-        dc.drawLine(x - 9, y, x + 9, y);
-        dc.drawLine(x, y - 10, x, y - 8);
-        dc.setPenWidth(1);
-    }
-
-    function drawMoon(dc, x, y) {
-        var phase = moonFraction();
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.fillCircle(x, y, 5);
-        dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_TRANSPARENT);
-        if (phase < 0.07 || phase > 0.93) {
-            dc.fillCircle(x, y, 5);
-        } else if (phase < 0.43 || phase > 0.57) {
-            dc.fillCircle(x + (phase < 0.5 ? -3 : 3), y, 4);
-        }
-    }
-
-    function drawCloud(dc, x, y) {
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.fillCircle(x - 6, y + 1, 4);
-        dc.fillCircle(x + 1, y - 2, 6);
-        dc.fillCircle(x + 8, y + 2, 4);
-        dc.fillRectangle(x - 9, y + 1, 20, 5);
-    }
-
-    function drawBolt(dc, x, y) {
-        dc.setColor(Gfx.COLOR_YELLOW, Gfx.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawLine(x + 2, y - 6, x - 2, y);
-        dc.drawLine(x - 2, y, x + 3, y);
-        dc.drawLine(x + 3, y, x - 1, y + 6);
-        dc.setPenWidth(1);
-    }
-
-    function drawHeader(dc) {
-        var clock = System.getClockTime();
-        var today = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
-        var weekdays = ["ND", "PN", "WT", "SR", "CZ", "PT", "SB"];
-        var months = ["STY", "LUT", "MAR", "KWI", "MAJ", "CZE", "LIP", "SIE", "WRZ", "PAZ", "LIS", "GRU"];
-        // Header: y=18..75; clock on the left, date on the right.
-        drawFitted(dc, 108, 17, twoDigits(clock.hour) + ":" + twoDigits(clock.min),
-                   153, Gfx.FONT_NUMBER_MEDIUM, Gfx.FONT_NUMBER_MILD, Gfx.COLOR_WHITE);
-        drawFitted(dc, 211, 25, weekdays[today.day_of_week - 1],
-                   58, Gfx.FONT_SMALL, Gfx.FONT_TINY, Gfx.COLOR_WHITE);
-        drawFitted(dc, 211, 47, today.day.toString() + " " + months[today.month - 1],
-                   63, Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_LT_GRAY);
-        separator(dc, 38, 242, 77);
-    }
-
-    function topSide(dc, x, id, info, w, leftSide) {
-        if (id == 0) { return; }
-        var item = readField(id, info, w);
-        if (id == 14 || id == 15) {
-            drawSun(dc, leftSide ? 40 : 179, 99, id == 14);
-            drawFitted(dc, leftSide ? 81 : 220, 91, item[1],
-                       55, Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
-            return;
-        }
-        drawFitted(dc, x, 83, item[0], 63, Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_YELLOW);
-        drawFitted(dc, x, 97, item[1], 65, Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
-    }
-
-    function topCenter(dc, id, info, w) {
-        if (id == 0) { return; }
-        var item = readField(id, info, w);
-        if (id == 34) {
-            // Moon phase is conveyed by its glyph; no label under it.
-            // The earlier label overlapped the divider and ring row.
-            drawMoon(dc, 140, 96);
-            return;
-        }
-        // One short value only, within the central 46 px slot.
-        drawFitted(dc, 140, 92, item[1], 46,
-                   Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
-    }
-
-    // Four compact 2x2 rings. The center belongs to the *value*,
-    // not to text labels; the top of each circle has a metric icon.
-    function ring(dc, cx, cy, color, ratio) {
-        var radius = 21;
-        dc.setPenWidth(4);
-        dc.setColor(0x484848, Gfx.COLOR_TRANSPARENT);
-        dc.drawCircle(cx, cy, radius);
-        if (ratio != null) {
-            var p = ratio.toFloat();
-            if (p < 0.0) { p = 0.0; }
-            if (p > 1.0) { p = 1.0; }
-            dc.setColor(color, Gfx.COLOR_TRANSPARENT);
-            if (p >= 0.999) {
-                dc.drawCircle(cx, cy, radius);
-            } else if (p > 0.005) {
-                var endAngle = 90 - (359.0 * p).toNumber();
-                if (endAngle < 0) { endAngle += 360; }
-                dc.drawArc(cx, cy, radius, Gfx.ARC_CLOCKWISE, 90, endAngle);
-            }
-        }
-        dc.setPenWidth(1);
-    }
-
-    // Minimal vector icons, designed for the 280px MIP screen.
-    // They avoid dependence on external fonts / emoji.
-    function metricIcon(dc, cx, cy, id, color, label) {
-        dc.setColor(color, Gfx.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        if (id == 1) { // Heart
-            dc.fillCircle(cx - 4, cy - 2, 4);
-            dc.fillCircle(cx + 4, cy - 2, 4);
-            dc.drawLine(cx - 8, cy, cx, cy + 7);
-            dc.drawLine(cx, cy + 7, cx + 8, cy);
-        } else if (id == 2) { // Footprints
-            dc.fillCircle(cx - 4, cy - 4, 3);
-            dc.fillCircle(cx + 4, cy + 2, 3);
-            dc.drawLine(cx - 5, cy - 7, cx - 3, cy - 9);
-            dc.drawLine(cx + 3, cy - 1, cx + 5, cy - 3);
-        } else if (id == 3) { // Body Battery
-            dc.drawRectangle(cx - 8, cy - 6, 15, 11);
-            dc.fillRectangle(cx + 7, cy - 2, 2, 4);
-            dc.drawLine(cx + 1, cy - 5, cx - 3, cy);
-            dc.drawLine(cx - 3, cy, cx + 2, cy);
-            dc.drawLine(cx + 2, cy, cx - 2, cy + 4);
-        } else if (id == 4 || id == 5) { // Intensity / stopwatch
-            dc.drawCircle(cx, cy, 6);
-            dc.drawLine(cx, cy, cx + 3, cy - 3);
-            dc.fillRectangle(cx - 2, cy - 10, 4, 3);
-        } else {
-            dc.setPenWidth(1);
-            var shortName = label;
-            if (shortName.length() > 6) { shortName = shortName.substring(0, 6); }
-            drawFitted(dc, cx, cy - 8, shortName, 39,
-                       Gfx.FONT_XTINY, Gfx.FONT_XTINY, color);
-        }
-        dc.setPenWidth(1);
-    }
-
-    // Pixel digits guarantee full 5-digit step values, e.g. 12345 and 25000.
-    // No ellipsis, no /10000 suffix and no invented numerical goal.
-    function digitRows(ch) {
-        if (ch == "0") { return ["111", "101", "101", "101", "111"]; }
-        if (ch == "1") { return ["010", "110", "010", "010", "111"]; }
-        if (ch == "2") { return ["111", "001", "111", "100", "111"]; }
-        if (ch == "3") { return ["111", "001", "111", "001", "111"]; }
-        if (ch == "4") { return ["101", "101", "111", "001", "001"]; }
-        if (ch == "5") { return ["111", "100", "111", "001", "111"]; }
-        if (ch == "6") { return ["111", "100", "111", "101", "111"]; }
-        if (ch == "7") { return ["111", "001", "001", "001", "001"]; }
-        if (ch == "8") { return ["111", "101", "111", "101", "111"]; }
-        if (ch == "9") { return ["111", "101", "111", "001", "111"]; }
-        return null;
-    }
-
-    function isDigits(value) {
-        if (value.length() < 1 || value.length() > 5) { return false; }
-        for (var i = 0; i < value.length(); i++) {
-            if (digitRows(value.substring(i, i + 1)) == null) { return false; }
-        }
-        return true;
-    }
-
-    function drawDigitalValue(dc, x, y, value) {
-        var n = value.length();
-        // Large digits for 1-2 characters; five-digit counts use compact 2px cells.
-        var scale = n <= 2 ? 3 : (n <= 4 ? 2 : 2);
-        var total = (n * 4 - 1) * scale;
-        var left = x - (total / 2).toNumber();
-        var top = y + (n <= 2 ? -1 : 3);
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        for (var d = 0; d < n; d++) {
-            var rows = digitRows(value.substring(d, d + 1));
+        for (var k = 0; k < label.length(); k++) {
+            var shape = glyph(label.substring(k, k + 1));
             for (var r = 0; r < 5; r++) {
                 for (var c = 0; c < 3; c++) {
-                    if (rows[r].substring(c, c + 1) == "1") {
-                        dc.fillRectangle(left + d * 4 * scale + c * scale,
-                                         top + r * scale, scale, scale);
+                    if (shape[r].substring(c, c + 1) == "1") {
+                        dc.fillRectangle(left + (k * 4 + c) * scale,
+                            topY + r * scale, scale, scale);
                     }
                 }
             }
         }
     }
 
-    function ringData(dc, cx, cy, fieldId, paletteCode, info, w) {
-        if (fieldId == 0) { return; }
-        var item = readField(fieldId, info, w);
-        var color = ringPalette(paletteCode);
-        ring(dc, cx, cy, color, item[2]);
-        metricIcon(dc, cx, cy - 12, fieldId, color, item[0]);
-        var value = item[1];
-        if (isDigits(value)) {
-            drawDigitalValue(dc, cx, cy, value);
-        } else {
-            drawFitted(dc, cx, cy + 1, value, 43,
-                       Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
-        }
+    function line(dc, x1, x2, y) {
+        dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
+        dc.setPenWidth(1);
+        dc.drawLine(x1, y, x2, y);
     }
 
-    // Three dedicated footer lanes: no text in the ring zone.
-    // A single weather row replaces two overlapping large font rows.
-    function weatherFooter(dc, id, info, w) {
-        if (id == 0) { return; }
-        var item = readField(id, info, w);
-        if (id == 16) {
-            drawCloud(dc, 63, 230);
-            drawFitted(dc, 125, 220, item[1], 63,
-                       Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
-            var caption = conditionText(w);
-            drawFitted(dc, 197, 223, caption, 82,
-                       Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_LT_GRAY);
-        } else {
-            drawFitted(dc, 85, 225, item[0], 78,
-                       Gfx.FONT_XTINY, Gfx.FONT_XTINY, 0x00FFFF);
-            drawFitted(dc, 188, 221, item[1], 97,
-                       Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
+    function iconSun(dc, x, y, rising) {
+        dc.setColor(rising ? Gfx.COLOR_YELLOW : Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawArc(x, y, 5, Gfx.ARC_COUNTER_CLOCKWISE, 0, 180);
+        dc.drawLine(x-8, y, x+8, y);
+        dc.drawLine(x, y-9, x, y-7);
+        dc.setPenWidth(1);
+    }
+    function iconMoon(dc, x, y) {
+        var phase = moonFraction();
+        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.fillCircle(x, y, 6);
+        dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_TRANSPARENT);
+        if (phase < 0.07 || phase > 0.93) { dc.fillCircle(x, y, 6); }
+        else if (phase < 0.43 || phase > 0.57) {
+            dc.fillCircle(x + (phase < 0.5 ? -3 : 3), y, 5);
         }
     }
-
-    function batteryFooter(dc, id, info, w) {
-        if (id == 0) { return; }
-        var item = readField(id, info, w);
-        if (id == 17) {
-            // Separate baseline; the original large font ended below the face.
-            drawBolt(dc, 115, 259);
-            drawFitted(dc, 157, 251, item[1], 64,
-                       Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
+    function iconCloud(dc, x, y) {
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.fillCircle(x-5, y+1, 4);
+        dc.fillCircle(x+1, y-2, 6);
+        dc.fillCircle(x+7, y+2, 4);
+        dc.fillRectangle(x-8, y+1, 18, 5);
+    }
+    function iconBattery(dc, x, y) {
+        dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawRectangle(x-11, y-6, 20, 12);
+        dc.fillRectangle(x+10, y-2, 3, 4);
+        dc.setPenWidth(1);
+    }
+    function iconStorm(dc, x, y) {
+        dc.setColor(Gfx.COLOR_YELLOW, Gfx.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawLine(x+3, y-7, x-2, y);
+        dc.drawLine(x-2, y, x+2, y);
+        dc.drawLine(x+2, y, x-3, y+7);
+        dc.setPenWidth(1);
+    }
+    function iconMetric(dc, cx, cy, id, color, label) {
+        dc.setColor(color, Gfx.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        if (id == 1) {
+            dc.fillCircle(cx-4, cy-2, 4); dc.fillCircle(cx+4, cy-2, 4);
+            dc.drawLine(cx-8, cy, cx, cy+7); dc.drawLine(cx, cy+7, cx+8, cy);
+        } else if (id == 2) {
+            dc.fillCircle(cx-4, cy-2, 3); dc.fillCircle(cx+4, cy+2, 3);
+            dc.drawLine(cx-5, cy-5, cx-3, cy-8);
+        } else if (id == 3) {
+            dc.drawRectangle(cx-9, cy-6, 17, 12);
+            dc.fillRectangle(cx+8, cy-3, 3, 6);
+            dc.drawLine(cx+1, cy-5, cx-3, cy+1);
+            dc.drawLine(cx-3, cy+1, cx+2, cy+1);
+        } else if (id == 4 || id == 5) {
+            dc.drawCircle(cx, cy, 6); dc.drawLine(cx, cy, cx+4, cy-3);
+            dc.fillRectangle(cx-2, cy-10, 4, 3);
+        } else if (id == 17) {
+            iconBattery(dc, cx, cy);
         } else {
-            drawFitted(dc, 140, 252, item[0] + " " + item[1], 140,
-                       Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
+            // For any of 35 configurable data types, a short label acts as icon.
+            var shortName = label;
+            if (shortName.length() > 3) { shortName = shortName.substring(0, 3); }
+            pixelText(dc, cx, cy-5, shortName, 22, 1, color);
         }
+        dc.setPenWidth(1);
+    }
+
+    function header(dc) {
+        var c = System.getClockTime();
+        var d = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
+        var weekdays = ["ND","PN","WT","SR","CZ","PT","SB"];
+        var months = ["STY","LUT","MAR","KWI","MAJ","CZE","LIP","SIE","WRZ","PAZ","LIS","GRU"];
+        // Time 43..157 horizontal, 24..53 vertical; date 199..245.
+        pixelText(dc, 104, 27, twoDigits(c.hour) + ":" + twoDigits(c.min), 114, 6, Gfx.COLOR_WHITE);
+        pixelText(dc, 218, 31, weekdays[d.day_of_week-1], 32, 3, Gfx.COLOR_WHITE);
+        pixelText(dc, 218, 51, d.day.toString() + " " + months[d.month-1], 53, 2, Gfx.COLOR_LT_GRAY);
+        line(dc, 37, 243, 69);
+    }
+
+    function topLeftRight(dc, id, labelX, iconX, left, info, weather) {
+        if (id == 0) { return; }
+        var data = readField(id, info, weather);
+        if (id == 14 || id == 15) {
+            iconSun(dc, iconX, 89, id == 14);
+            pixelText(dc, labelX, 83, data[1], 45, 2, Gfx.COLOR_WHITE);
+        } else {
+            pixelText(dc, labelX, 75, data[0], 52, 1, Gfx.COLOR_YELLOW);
+            pixelText(dc, labelX, 88, data[1], 52, 2, Gfx.COLOR_WHITE);
+        }
+    }
+    function topMiddle(dc, id, info, weather) {
+        if (id == 0) { return; }
+        var data = readField(id, info, weather);
+        if (id == 34) { iconMoon(dc, 140, 89); }
+        else { pixelText(dc, 140, 84, data[1], 43, 2, Gfx.COLOR_WHITE); }
+    }
+
+    function progress(dc, x, y, color, fraction) {
+        dc.setColor(0x484848, Gfx.COLOR_TRANSPARENT);
+        dc.setPenWidth(4);
+        dc.drawCircle(x, y, 26);
+        if (fraction != null) {
+            var p = fraction.toFloat();
+            if (p < 0.0) { p = 0.0; }
+            if (p > 1.0) { p = 1.0; }
+            dc.setColor(color, Gfx.COLOR_TRANSPARENT);
+            if (p >= 0.999) { dc.drawCircle(x, y, 26); }
+            else if (p > 0.001) {
+                var endAngle = 90 - (359.0 * p).toNumber();
+                if (endAngle < 0) { endAngle += 360; }
+                dc.drawArc(x, y, 26, Gfx.ARC_CLOCKWISE, 90, endAngle);
+            }
+        }
+        dc.setPenWidth(1);
+    }
+
+    function ring(dc, cx, cy, id, palette, info, weather) {
+        if (id == 0) { return; }
+        var data = readField(id, info, weather);
+        var color = ringPalette(palette);
+        progress(dc, cx, cy, color, data[2]);
+        iconMetric(dc, cx, cy-12, id, color, data[0]);
+        var value = data[1];
+        // 6 digits (999999) fit; no '10k' truncation for common step counts.
+        pixelText(dc, cx, cy+2, value, 47, value.length() <= 3 ? 4 : 3, Gfx.COLOR_WHITE);
+    }
+
+    function footer(dc, mainId, minorId, info, weather) {
+        line(dc, 45, 235, 235);
+        var main = readField(mainId, info, weather);
+        if (mainId == 16) {
+            iconCloud(dc, 60, 245);
+            pixelText(dc, 107, 239, main[1], 52, 2, Gfx.COLOR_WHITE);
+            pixelText(dc, 188, 242, conditionText(weather), 96, 1, Gfx.COLOR_LT_GRAY);
+        } else if (mainId != 0) {
+            pixelText(dc, 91, 240, main[0], 65, 1, 0x00FFFF);
+            pixelText(dc, 184, 239, main[1], 87, 2, Gfx.COLOR_WHITE);
+        }
+        if (minorId != 0) {
+            var minor = readField(minorId, info, weather);
+            if (minorId == 17) {
+                iconBattery(dc, 112, 263);
+                pixelText(dc, 157, 258, minor[1], 58, 2, Gfx.COLOR_WHITE);
+            } else {
+                pixelText(dc, 140, 258, minor[0] + " " + minor[1], 136, 2, Gfx.COLOR_WHITE);
+            }
+        }
+        // A storm ⚡ is never used as the battery icon.
+        if (setting("alertOn", false) && _storm.warning()) { iconStorm(dc, 203, 262); }
     }
 
     function onUpdate(dc) {
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
         dc.clear();
-        var monitor = Monitor.getInfo();
-        var w = null;
-        try { w = Weather.getCurrentConditions(); } catch (e) { }
-
-        drawHeader(dc);
-        // Top strip: 78..113, with independent left, center and right slots.
-        topSide(dc, 82, setting("top1", 14), monitor, w, true);
-        topCenter(dc, setting("topMid", 34), monitor, w);
-        topSide(dc, 217, setting("top2", 15), monitor, w, false);
-        separator(dc, 33, 247, 113);
-
-        // Pixel areas (280x280): circles top 115..161 and bottom 167..213.
-        // Three separate footer lines start at 217, 235 and 245.
-        ringData(dc, 89, 144, setting("ring1", 1), setting("ringColor1", 0), monitor, w);
-        ringData(dc, 191, 144, setting("ring2", 2), setting("ringColor2", 1), monitor, w);
-        ringData(dc, 89, 194, setting("ring3", 3), setting("ringColor3", 6), monitor, w);
-        ringData(dc, 191, 194, setting("ring4", 4), setting("ringColor4", 3), monitor, w);
-
-        separator(dc, 47, 233, 218);
-        // Weather on row 1, watch battery on row 2; fixed vertical lanes.
-        weatherFooter(dc, setting("bottomMain", 16), monitor, w);
-        batteryFooter(dc, setting("bottomMini", 17), monitor, w);
-        if (_storm.warning()) { drawBolt(dc, 250, 229); }
+        var info = Monitor.getInfo();
+        var weather = null;
+        try { weather = Weather.getCurrentConditions(); } catch (e) { }
+        header(dc);
+        topLeftRight(dc, setting("top1", 14), 91, 54, true, info, weather);
+        topMiddle(dc, setting("topMid", 34), info, weather);
+        topLeftRight(dc, setting("top2", 15), 211, 171, false, info, weather);
+        line(dc, 32, 248, 108);
+        ring(dc, 86, 145, setting("ring1", 1), setting("ringColor1", 0), info, weather);
+        ring(dc, 194, 145, setting("ring2", 2), setting("ringColor2", 2), info, weather);
+        ring(dc, 86, 203, setting("ring3", 3), setting("ringColor3", 6), info, weather);
+        ring(dc, 194, 203, setting("ring4", 4), setting("ringColor4", 3), info, weather);
+        footer(dc, setting("bottomMain", 16), setting("bottomMini", 17), info, weather);
     }
 }

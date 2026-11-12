@@ -15,7 +15,7 @@ class StormGuard {
     }
 
     function warning() {
-        if (!setting("alertOn", true)) { return false; }
+        if (!setting("alertOn", false)) { return false; }
         var now = Time.now().value();
         if (_lastCheck != 0 && now - _lastCheck < 300) { return _lastWarning; }
         _lastCheck = now;
