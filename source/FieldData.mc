@@ -74,6 +74,27 @@ function conditionText(w) {
     return "POCHMURNIE";
 }
 
+
+// Approximate lunar phase, based on synodic month. Does not access the network.
+// This is an indicative phase label, not a precise astronomical ephemeris.
+function moonFraction() {
+    var secondsSinceNewMoon = Time.now().value().toFloat() - 947182440.0;
+    var cycles = secondsSinceNewMoon / 2551443.0;
+    return cycles - cycles.toNumber();
+}
+
+function moonPhaseLabel() {
+    var p = moonFraction();
+    if (p < 0.055 || p >= 0.945) { return "NOW"; }
+    if (p < 0.195) { return "PRZYB."; }
+    if (p < 0.305) { return "I KW."; }
+    if (p < 0.445) { return "GAR.+"; }
+    if (p < 0.555) { return "PEL."; }
+    if (p < 0.695) { return "GAR.-"; }
+    if (p < 0.805) { return "III KW."; }
+    return "UBYW.";
+}
+
 // Each field is [short label, displayed value, ratio or null].
 // No invented goals: non-goal metrics have a neutral, unfilled ring.
 function readField(id, info, w) {
@@ -164,6 +185,7 @@ function readField(id, info, w) {
         var d = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
         return ["DATA", twoDigits(d.day) + "." + twoDigits(d.month), null];
     }
+    if (id == 34) { return ["KSIEZYC", moonPhaseLabel(), null]; }
     if (id == 33) {
         x = w == null ? null : w.cloudCover;
         return ["CHMURY", x == null ? "--" : numeric(x) + "%", x == null ? null : x.toFloat() / 100.0];

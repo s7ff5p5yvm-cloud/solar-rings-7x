@@ -1,12 +1,43 @@
 using Toybox.Application.Storage as Storage;
+using Toybox.Application.Properties as Properties;
 using Toybox.WatchUi as Ui;
 using Toybox.Graphics as Gfx;
 
-// All configuration is stored ON THE WATCH. Works for USB sideloads too.
-// Field identifiers are stable across versions.
+// App properties are shared by Garmin Connect IQ on iPhone and the on-watch menu.
+// IDs and defaults are declared in resources/properties.xml and settings.xml.
+// Old values from watch-only settings are imported once during the update.
 function setting(key, fallback) {
-    var value = Storage.getValue(key);
-    return value == null ? fallback : value;
+    try {
+        var value = Properties.getValue(key);
+        return value == null ? fallback : value;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function saveSetting(key, value) {
+    Properties.setValue(key, value);
+}
+
+function migrateOldSettings() {
+    if (Storage.getValue("mobileSettingsMigrationV1") == true) { return; }
+    var keys = [
+        "top1", "top2", "topMid", "ring1", "ring2", "ring3", "ring4",
+        "bottomMain", "bottomMini", "ringColor1", "ringColor2",
+        "ringColor3", "ringColor4", "alertOn", "alertDrop", "altFilter"
+    ];
+    // Never overwrite a setting that is already set in the phone app.
+    var defaults = [14, 15, 34, 1, 2, 3, 4, 16, 17, 0, 1, 6, 3, true, 4, 20];
+    for (var i = 0; i < keys.size(); i++) {
+        var oldValue = Storage.getValue(keys[i]);
+        if (oldValue != null) {
+            var current = Properties.getValue(keys[i]);
+            if (current == null || current == defaults[i]) {
+                Properties.setValue(keys[i], oldValue);
+            }
+        }
+    }
+    Storage.setValue("mobileSettingsMigrationV1", true);
 }
 
 function fieldName(id) {
@@ -18,7 +49,7 @@ function fieldName(id) {
         "Temperatura", "Odczuwalna", "Wilgotnosc", "Wiatr",
         "Cisnienie", "Wysokosc", "Cel krokow", "Cel minut",
         "Temp. max", "Temp. min", "Pasek ruchu", "Indeks UV",
-        "Szansa deszczu", "Godzina", "Data", "Zachmurzenie"
+        "Szansa deszczu", "Godzina", "Data", "Zachmurzenie", "Faza Ksiezyca"
     ];
     if (id < 0 || id >= choices.size()) { return "Puste"; }
     return choices[id];
@@ -54,6 +85,7 @@ function addSetting(menu, title, key, fallback) {
 function makeSettingsMenu() {
     var menu = new Ui.Menu2({:title => "Solar Rings 7X"});
     addSetting(menu, "Gora lewa", "top1", 14);
+    addSetting(menu, "Gora srodek", "topMid", 34);
     addSetting(menu, "Gora prawa", "top2", 15);
     addSetting(menu, "Kolo 1", "ring1", 1);
     addSetting(menu, "Kolo 2", "ring2", 2);
@@ -63,7 +95,7 @@ function makeSettingsMenu() {
     addSetting(menu, "Dol - pasek", "bottomMini", 17);
     addSetting(menu, "Kolor kola 1", "ringColor1", 0);
     addSetting(menu, "Kolor kola 2", "ringColor2", 1);
-    addSetting(menu, "Kolor kola 3", "ringColor3", 2);
+    addSetting(menu, "Kolor kola 3", "ringColor3", 6);
     addSetting(menu, "Kolor kola 4", "ringColor4", 3);
     addSetting(menu, "Burza: ikona", "alertOn", true);
     addSetting(menu, "Burza: spadek", "alertDrop", 4);
@@ -83,7 +115,7 @@ class SolarSettingsDelegate extends Ui.Menu2InputDelegate {
         var index = _menu.findItemById(key);
         if (key == "alertOn") {
             var next = !setting("alertOn", true);
-            Storage.setValue("alertOn", next);
+            saveSetting("alertOn", next);
             item.setSubLabel(optionLabel(key, next));
             _menu.updateItem(item, index);
             return;
@@ -104,7 +136,7 @@ class SolarSettingsDelegate extends Ui.Menu2InputDelegate {
                 choices.addItem(new Ui.MenuItem(optionLabel(key, c), null, c, {}));
             }
         } else {
-            for (var i = 0; i <= 33; i++) {
+            for (var i = 0; i <= 34; i++) {
                 choices.addItem(new Ui.MenuItem(fieldName(i), null, i, {}));
             }
         }
@@ -125,7 +157,7 @@ class SolarChoiceDelegate extends Ui.Menu2InputDelegate {
 
     function onSelect(item) {
         var value = item.getId();
-        Storage.setValue(_key, value);
+        saveSetting(_key, value);
         var parentItem = _menu.getItem(_index);
         if (parentItem != null) {
             parentItem.setSubLabel(optionLabel(_key, value));
