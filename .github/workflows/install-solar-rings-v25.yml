@@ -32,6 +32,11 @@ jobs:
               if not all(name in names for name in expected):
                   raise SystemExit('Unexpected ZIP; expected the v2.5 patch archive')
               for name in names:
+                  # A workflow cannot rewrite another workflow using the default GitHub token.
+                  # Keep the existing build-garmin.yml unchanged.
+                  if name.startswith('.github/workflows/'):
+                      print('Skipping protected workflow:', name)
+                      continue
                   pp = pathlib.PurePosixPath(name)
                   if pp.is_absolute() or '..' in pp.parts:
                       raise SystemExit('Unsafe archive path ' + name)
@@ -64,7 +69,8 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          # Only stage watch-face sources and resources, never GitHub workflow files.
+          git add -A -- manifest.xml source resources tests AKTUALIZACJA_v2_5_PL.md SolarRings7X_2_5_PODMIEN.zip
           if git diff --cached --quiet; then
             echo 'No changes'
           else
