@@ -142,7 +142,7 @@ class SolarRings7XFace extends Ui.WatchFace {
             dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
             dc.drawText(164, 225, Gfx.FONT_XTINY, conditionText(weather), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
-            dc.setColor(Gfx.COLOR_CYAN, Gfx.COLOR_TRANSPARENT);
+            dc.setColor(0x00FFFF, Gfx.COLOR_TRANSPARENT);
             dc.drawText(91, 209, Gfx.FONT_TINY, f[0], Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(186, 207, Gfx.FONT_SMALL, f[1], Gfx.TEXT_JUSTIFY_CENTER);
