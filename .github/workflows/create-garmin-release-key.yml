@@ -1,0 +1,41 @@
+
+name: Create Garmin signing key (one-time)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  create-key:
+    name: Create private Garmin signing key
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Generate release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/garmin-release-key"
+
+          openssl genpkey -algorithm RSA \
+            -pkeyopt rsa_keygen_bits:4096 \
+            -out "$RUNNER_TEMP/garmin-release-key/temp.pem" 2>/dev/null
+
+          openssl pkcs8 -topk8 -inform PEM -outform DER \
+            -in "$RUNNER_TEMP/garmin-release-key/temp.pem" \
+            -out "$RUNNER_TEMP/garmin-release-key/developer_key.der" -nocrypt
+
+          base64 -w 0 "$RUNNER_TEMP/garmin-release-key/developer_key.der" \
+            > "$RUNNER_TEMP/garmin-release-key/CONNECTIQ_DEVELOPER_KEY_BASE64.txt"
+
+          rm "$RUNNER_TEMP/garmin-release-key/temp.pem"
+
+      - name: Upload private signing key
+        uses: actions/upload-artifact@v4
+        with:
+          name: garmin-private-signing-key
+          path: ${{ runner.temp }}/garmin-release-key/
+          retention-days: 1
+          if-no-files-found: error
