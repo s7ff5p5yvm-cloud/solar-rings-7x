@@ -1,0 +1,73 @@
+name: Install Solar Rings v2.5
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Unpack Solar Rings update
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import zipfile, pathlib
+          patch = pathlib.Path('SolarRings7X_2_5_PODMIEN.zip')
+          if not patch.is_file():
+              raise SystemExit('Missing SolarRings7X_2_5_PODMIEN.zip in repository root')
+          with zipfile.ZipFile(patch) as z:
+              names = z.namelist()
+              expected = ['manifest.xml', 'source/SolarRings7X.mc',
+                          'resources/settings/settings.xml',
+                          'resources/settings/properties.xml',
+                          '.github/workflows/build-garmin.yml']
+              if not all(name in names for name in expected):
+                  raise SystemExit('Unexpected ZIP; expected the v2.5 patch archive')
+              for name in names:
+                  pp = pathlib.PurePosixPath(name)
+                  if pp.is_absolute() or '..' in pp.parts:
+                      raise SystemExit('Unsafe archive path ' + name)
+                  path = pathlib.Path(name)
+                  # Recover if files named 'source' or 'resources' were mistakenly
+                  # uploaded at the repository root instead of folders.
+                  for parent in list(path.parents)[::-1]:
+                      if parent != pathlib.Path('.') and parent.is_file():
+                          backup = parent.with_name(parent.name + '.legacy-backup')
+                          if backup.exists(): parent.unlink()
+                          else: parent.rename(backup)
+                  if name.endswith('/'):
+                      path.mkdir(parents=True, exist_ok=True)
+                  else:
+                      path.parent.mkdir(parents=True, exist_ok=True)
+                      path.write_bytes(z.read(name))
+          for old in ('resources/settings.xml', 'resources/properties.xml'):
+              old_path = pathlib.Path(old)
+              if old_path.is_file(): old_path.unlink()
+          patch.unlink()
+          print('Solar Rings v2.5 patch installed')
+          PYCODE
+
+      - name: Validate project
+        run: python3 tests/check_project.py
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes'
+          else
+            git commit -m 'Solar Rings 7X v2.5: layout and Connect IQ settings'
+            git push
+          fi
