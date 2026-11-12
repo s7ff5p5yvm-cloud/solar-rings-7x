@@ -74,85 +74,99 @@ jobs:
           monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v3.prg -y "$RUNNER_TEMP/key.der" -w
           monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v3.iq -y "$RUNNER_TEMP/key.der" -w
 
-      - name: Diagnose IQ package and verify iPhone settings
+      - name: Install 7-Zip for Garmin SDK 9.x IQ packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends p7zip-full
+          command -v 7z
+
+      - name: Inspect IQ package and verify iPhone settings (ZIP or 7z)
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PYTHON'
           from pathlib import Path
-          import subprocess
-          import zipfile
+          import subprocess, zipfile, tempfile
           import xml.etree.ElementTree as ET
 
-          iq = Path('watchface_v3/dist/SolarRings7X_v3.iq')
-          report_path = Path('watchface_v3/diagnostics/iq_diagnostics.txt')
+          project = Path('watchface_v3')
+          iq = project / 'dist/SolarRings7X_v3.iq'
+          report_path = project / 'diagnostics/iq_diagnostics.txt'
           report_path.parent.mkdir(parents=True, exist_ok=True)
           lines = []
+          errors = []
 
-          def record(message):
-              print(message)
-              lines.append(message)
+          def log(s):
+              print(s)
+              lines.append(s)
 
-          valid = True
-          record('Solar Rings 7X v3 - IQ packaging diagnostics')
-          for p in ('watchface_v3/resources/settings/properties.xml',
-                    'watchface_v3/resources/settings/settings.xml'):
-              path = Path(p)
-              if path.is_file():
-                  try:
-                      root = ET.parse(path).getroot()
-                      record('Source XML OK: {} ({} entries)'.format(p, len(root)))
-                  except ET.ParseError as e:
-                      record('SOURCE XML INVALID: {}: {}'.format(p, e))
-                      valid = False
+          try:
+              log('Solar Rings 7X v3 - IQ archive + iPhone settings check')
+              for rel in ('resources/settings/properties.xml', 'resources/settings/settings.xml'):
+                  src = project / rel
+                  if not src.is_file():
+                      errors.append('Missing source file: ' + str(src))
+                      continue
+                  tree = ET.parse(src)
+                  log('Source resource OK: {} ({} entries)'.format(rel, len(tree.getroot())))
+
+              if not iq.is_file() or iq.stat().st_size == 0:
+                  errors.append('IQ file missing or empty: ' + str(iq))
               else:
-                  record('SOURCE XML MISSING: {}'.format(p))
-                  valid = False
-
-          if not iq.is_file():
-              record('ERROR: IQ file not created: {}'.format(iq))
-              valid = False
-          else:
-              record('IQ size in bytes: {}'.format(iq.stat().st_size))
-              record('IQ first 32 bytes (hex): {}'.format(iq.open('rb').read(32).hex(' ')))
-              result = subprocess.run(['file', '-b', str(iq)],
-                                      capture_output=True, text=True, check=False)
-              record('Linux file identification: {}'.format(result.stdout.strip()))
-              if not zipfile.is_zipfile(iq):
-                  record('ERROR: This IQ is NOT a readable ZIP container. Garmin IQ exports should be ZIP archives.')
-                  record('Do not submit it to Connect IQ before finding the cause.')
-                  valid = False
-              else:
-                  try:
-                      with zipfile.ZipFile(iq, 'r') as archive:
-                          bad = archive.testzip()
-                          if bad:
-                              record('ERROR: corrupt ZIP entry: {}'.format(bad))
-                              valid = False
-                          names = archive.namelist()
-                          record('IQ archive entries: {}'.format(len(names)))
-                          for name in names[:30]:
-                              record('  {}'.format(name))
-                          matches = [n for n in names
-                                     if n.lower().endswith('-settings.json')
-                                     or n.lower().endswith('/settings.json')]
-                          record('Settings JSON entries: {}'.format(matches))
-                          if not matches:
-                              record('ERROR: No generated settings JSON bundled in IQ')
-                              valid = False
+                  header = iq.open('rb').read(8)
+                  log('IQ size: {} bytes; signature: {}'.format(iq.stat().st_size, header.hex(' ')))
+                  is_7z = header.startswith(bytes.fromhex('377abcaf271c'))
+                  is_zip = zipfile.is_zipfile(iq)
+                  if not (is_zip or is_7z):
+                      errors.append('Unsupported IQ archive signature (neither ZIP nor 7z)')
+                  else:
+                      with tempfile.TemporaryDirectory(prefix='iq_contents_') as d:
+                          dest = Path(d)
+                          if is_7z:
+                              log('Detected 7z archive (normal for current Garmin SDK).')
+                              test = subprocess.run(['7z','t','-bsp0',str(iq)], capture_output=True, text=True)
+                              if test.returncode != 0:
+                                  errors.append('7z archive integrity check FAILED')
+                                  log((test.stdout + test.stderr)[-4000:])
+                              else:
+                                  log('7z integrity check PASSED.')
+                                  extracted = subprocess.run(['7z','x','-y','-bsp0','-o'+str(dest),str(iq)], capture_output=True, text=True)
+                                  if extracted.returncode != 0:
+                                      errors.append('Unable to extract 7z archive')
+                                      log((extracted.stdout + extracted.stderr)[-4000:])
                           else:
-                              content = b'\n'.join(archive.read(n) for n in matches)
-                              for key in (b'slotTop1V3', b'slotRing2V3', b'stormOnV3'):
-                                  if key not in content:
-                                      record('ERROR: Missing phone setting {}'.format(key.decode()))
-                                      valid = False
-                  except (zipfile.BadZipFile, OSError) as exc:
-                      record('ERROR: failed to inspect IQ ZIP: {}'.format(exc))
-                      valid = False
-
-          record('RESULT: {}'.format('PASS' if valid else 'FAIL - see diagnostics'))
-          report_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-          if not valid:
+                              log('Detected ZIP archive (older Garmin SDK).')
+                              with zipfile.ZipFile(iq) as z:
+                                  bad = z.testzip()
+                                  if bad is not None:
+                                      errors.append('Corrupt ZIP entry: ' + bad)
+                                  else:
+                                      z.extractall(dest)
+                          names = sorted(p.relative_to(dest).as_posix() for p in dest.rglob('*') if p.is_file())
+                          log('Archive contains {} files'.format(len(names)))
+                          for name in names[:60]:
+                              log('  ' + name)
+                          matches = [p for p in dest.rglob('*') if p.is_file() and p.name.lower().endswith('settings.json')]
+                          log('Generated settings JSON files: {}'.format([p.relative_to(dest).as_posix() for p in matches]))
+                          if not matches:
+                              errors.append('No generated *settings.json found inside .IQ')
+                          else:
+                              settings_data = b'\n'.join(p.read_bytes() for p in matches)
+                              for key in (b'slotTop1V3', b'slotTop2V3', b'slotTop3V3', b'slotRing1V3', b'slotRing2V3', b'slotRing3V3', b'stormOnV3'):
+                                  if key not in settings_data:
+                                      errors.append('Missing key in exported settings: ' + key.decode())
+                              if not errors:
+                                  log('Phone configuration keys: VERIFIED.')
+          except Exception as e:
+              errors.append(type(e).__name__ + ': ' + str(e))
+          finally:
+              for err in errors:
+                  log('ERROR: ' + err)
+              log('RESULT: ' + ('PASS' if not errors else 'FAIL'))
+              report_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          if errors:
               raise SystemExit(1)
           PYTHON
 
