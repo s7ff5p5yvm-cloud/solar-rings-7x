@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+    <iq:application
+        id="D1F8E1A4B7FC45BD91E8F0A0959041BF"
+        type="watchface"
+        entry="SolarRings7XApp"
+        name="@Strings.AppName"
+        launcherIcon="@Drawables.LauncherIcon"
+        version="2.3.0"
+        minSdkVersion="5.0.0">
+        <iq:products>
+            <iq:product id="fenix7xpro"/>
+            <iq:product id="fenix7xpronowifi"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="SensorHistory"/>
+            <iq:uses-permission id="Positioning"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>pol</iq:language>
+        </iq:languages>
+    </iq:application>
+</iq:manifest>
