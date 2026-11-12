@@ -1,3 +1,4 @@
+
 name: Preview Solar Rings in Garmin Simulator
 
 on:
@@ -29,7 +30,7 @@ jobs:
           install-devices: 'true'
           install-simulator-dependencies: 'true'
 
-      - name: Install simulator native libraries and screenshot utility
+      - name: Install simulator native libraries
         shell: bash
         run: |
           set -euo pipefail
@@ -43,14 +44,15 @@ jobs:
             xauth \
             dbus-x11
 
-      - name: Verify simulator shared libraries
+      - name: Verify simulator libraries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p preview
-          ldd "$CONNECT_IQ_HOME/bin/simulator" | tee preview/simulator-libraries.txt
+          ldd "$CONNECT_IQ_HOME/bin/simulator" \
+            | tee preview/simulator-libraries.txt
           if grep -q 'not found' preview/simulator-libraries.txt; then
-            echo 'ERROR: Garmin simulator has missing system libraries.' >&2
+            echo 'ERROR: Missing simulator libraries.' >&2
             exit 1
           fi
 
@@ -58,7 +60,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 \
+          openssl genpkey -algorithm RSA \
+            -pkeyopt rsa_keygen_bits:4096 \
             -out "$RUNNER_TEMP/preview-key.pem" 2>/dev/null
           openssl pkcs8 -topk8 -inform PEM -outform DER \
             -in "$RUNNER_TEMP/preview-key.pem" \
@@ -81,8 +84,11 @@ jobs:
           cat > "$RUNNER_TEMP/test-preview.sh" <<'SCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
-          "$CONNECT_IQ_HOME/bin/simulator" >preview/simulator.log 2>&1 &
+
+          "$CONNECT_IQ_HOME/bin/simulator" \
+            >preview/simulator.log 2>&1 &
           simulator_pid=$!
+
           cleanup() {
             kill "$simulator_pid" 2>/dev/null || true
             wait "$simulator_pid" 2>/dev/null || true
@@ -92,20 +98,20 @@ jobs:
           ready=0
           for attempt in $(seq 1 60); do
             if ! kill -0 "$simulator_pid" 2>/dev/null; then
-              echo 'Simulator terminated before it became ready.' >&2
-              echo 'Simulator log:' >&2
+              echo 'Simulator terminated before ready.' >&2
               cat preview/simulator.log >&2 || true
               exit 1
             fi
+
             if (: > /dev/tcp/127.0.0.1/1234) 2>/dev/null; then
               ready=1
               break
             fi
             sleep 0.5
           done
+
           if [[ "$ready" -ne 1 ]]; then
-            echo 'Simulator did not start within 30 seconds.' >&2
-            echo 'Simulator log:' >&2
+            echo 'Simulator startup timeout.' >&2
             cat preview/simulator.log >&2 || true
             exit 1
           fi
@@ -114,22 +120,27 @@ jobs:
             preview/SolarRings7XPro.prg fenix7xpro \
             >preview/monkeydo.log 2>&1 &
           monkeydo_pid=$!
+
           sleep 12
 
-          # Screenshot of the virtual monitor, where the Garmin simulator runs.
-          import -display "$DISPLAY" -window root preview/simulator-screen.png
+          import -display "$DISPLAY" -window root \
+            preview/simulator-screen.png
+
           test -s preview/simulator-screen.png
-          echo 'Screenshot captured: preview/simulator-screen.png'
-          echo 'Simulator log:'
+
+          echo 'Screenshot captured'
           cat preview/monkeydo.log || true
 
           kill "$monkeydo_pid" 2>/dev/null || true
           wait "$monkeydo_pid" 2>/dev/null || true
           SCRIPT
+
           chmod +x "$RUNNER_TEMP/test-preview.sh"
+
           timeout --signal=TERM --kill-after=10s 150s \
             xvfb-run -a -s '-screen 0 1280x1024x24' \
-            dbus-run-session -- bash "$RUNNER_TEMP/test-preview.sh"
+            dbus-run-session -- \
+            bash "$RUNNER_TEMP/test-preview.sh"
 
       - name: Upload screenshot and logs
         if: always()
