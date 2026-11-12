@@ -1,0 +1,55 @@
+name: Install Solar Rings 7X v2.3 update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get repository
+        uses: actions/checkout@v4
+
+      - name: Unpack and check update
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH=SolarRings7X_2_3_PODMIEN_PLIKI.zip
+          test -f "$PATCH" || { echo "Missing $PATCH in repository root"; exit 1; }
+          unzip -tq "$PATCH"
+          mkdir -p /tmp/solar-v23
+          unzip -q "$PATCH" -d /tmp/solar-v23
+          test -f /tmp/solar-v23/manifest.xml
+          test -f /tmp/solar-v23/resources/settings/settings.xml
+          test -f /tmp/solar-v23/resources/settings/properties.xml
+          test -f /tmp/solar-v23/source/SolarRings7X.mc
+
+      - name: Replace files and validate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/solar-v23/manifest.xml manifest.xml
+          mkdir -p source resources tests
+          cp -R /tmp/solar-v23/source/. source/
+          cp -R /tmp/solar-v23/resources/. resources/
+          cp -R /tmp/solar-v23/tests/. tests/
+          git rm -f --ignore-unmatch resources/settings.xml resources/properties.xml
+          python3 tests/check_project.py
+
+      - name: Commit update and remove ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.xml source resources tests
+          git rm -f --ignore-unmatch SolarRings7X_2_3_PODMIEN_PLIKI.zip
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'Update Solar Rings 7X to v2.3'
+            git push origin HEAD:main
+          fi
