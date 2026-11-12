@@ -1,0 +1,75 @@
+name: Install Solar Rings 7X v2.4 update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: Update Solar Rings v2.4
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Get repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Unpack and check update
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH=SolarRings7X_2_4_PODMIEN_PLIKI.zip
+          test -f "$PATCH" || { echo "ERROR: Upload $PATCH into the repository root first"; exit 1; }
+          unzip -tq "$PATCH"
+          mkdir -p "$RUNNER_TEMP/solar-v24"
+          unzip -q "$PATCH" -d "$RUNNER_TEMP/solar-v24"
+          test -f "$RUNNER_TEMP/solar-v24/manifest.xml"
+          test -f "$RUNNER_TEMP/solar-v24/source/SolarRings7X.mc"
+
+      - name: Replace files and validate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Existing paths:'
+          ls -ld source resources tests 2>&1 || true
+          git ls-files --stage -- source resources tests | head -40 || true
+
+          # A file or symlink named 'resources' prevents mkdir -p from working.
+          # Preserve any such item in the repository instead of deleting it.
+          for dir in source resources tests; do
+            if { test -e "$dir" || test -L "$dir"; } && { test ! -d "$dir" || test -L "$dir"; }; then
+              backup="$dir.pre-v24-backup"
+              if test -e "$backup" || test -L "$backup"; then
+                echo "ERROR: $backup already exists, refusing to overwrite it" >&2
+                exit 1
+              fi
+              echo "WARNING: $dir is not a normal directory. Backing it up as $backup"
+              mv "$dir" "$backup"
+            fi
+            mkdir -p "$dir"
+          done
+
+          cp "$RUNNER_TEMP/solar-v24/manifest.xml" manifest.xml
+          cp -R "$RUNNER_TEMP/solar-v24/source/." source/
+          cp -R "$RUNNER_TEMP/solar-v24/tests/." tests/
+
+          # Old settings locations are not used in v2.4.
+          git rm -f --ignore-unmatch -- resources/settings.xml resources/properties.xml
+          python3 tests/check_project.py
+
+      - name: Commit update and remove patch ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f --ignore-unmatch -- SolarRings7X_2_4_PODMIEN_PLIKI.zip
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'Fix resource path conflict and install Solar Rings v2.4'
+            git push origin HEAD:main
+          fi
