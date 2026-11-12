@@ -1,0 +1,85 @@
+name: Build Garmin Solar Rings 7X
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile for fenix7xpro
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get project
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download Garmin Connect IQ SDK and device profiles
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.3.0'
+          install-devices: 'true'
+
+      - name: Check SDK and device profile
+        run: |
+          monkeyc --version
+          echo 'Device definitions:'
+          ls -d "$HOME/.Garmin/ConnectIQ/Devices"/fenix7xpro* || true
+
+      - name: Prepare developer key
+        id: key
+        env:
+          SAVED_KEY_BASE64: ${{ secrets.CONNECTIQ_DEVELOPER_KEY_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$SAVED_KEY_BASE64" ]; then
+            printf '%s' "$SAVED_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/developer_key.der"
+            echo 'release_key=true' >> "$GITHUB_OUTPUT"
+            echo 'Using saved key from GitHub Actions Secrets.'
+          else
+            # Test builds only. Never reuse this temporary key to publish.
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 \
+              -out "$RUNNER_TEMP/test-developer-key.pem" 2>/dev/null
+            openssl pkcs8 -topk8 -inform PEM -outform DER \
+              -in "$RUNNER_TEMP/test-developer-key.pem" \
+              -out "$RUNNER_TEMP/developer_key.der" -nocrypt
+            echo 'release_key=false' >> "$GITHUB_OUTPUT"
+            echo 'Temporary test signing key created. Not for Connect IQ Store releases.'
+          fi
+          chmod 600 "$RUNNER_TEMP/developer_key.der"
+
+      - name: Compile watch face PRG
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          monkeyc -f monkey.jungle \
+            -d fenix7xpro \
+            -o dist/SolarRings7XPro.prg \
+            -y "$RUNNER_TEMP/developer_key.der" -w
+
+      - name: Export IQ for Store only with a saved release key
+        if: steps.key.outputs.release_key == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          monkeyc -e -f monkey.jungle \
+            -o dist/SolarRings7XPro.iq \
+            -y "$RUNNER_TEMP/developer_key.der" -w
+
+      - name: Upload compiled files
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings7XPro-build
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
