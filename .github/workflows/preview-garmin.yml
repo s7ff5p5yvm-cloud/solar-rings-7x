@@ -1,0 +1,118 @@
+name: Preview Solar Rings in Garmin Simulator
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Fenix 7X Pro - test and screenshot
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Download watch face source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Garmin SDK and Linux simulator dependencies
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.2.0'
+          install-devices: 'true'
+          install-simulator-dependencies: 'true'
+
+      - name: Install screenshot utility
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick
+
+      - name: Prepare temporary signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 \
+            -out "$RUNNER_TEMP/preview-key.pem" 2>/dev/null
+          openssl pkcs8 -topk8 -inform PEM -outform DER \
+            -in "$RUNNER_TEMP/preview-key.pem" \
+            -out "$RUNNER_TEMP/preview-key.der" -nocrypt
+
+      - name: Compile watch face for simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          monkeyc -f monkey.jungle \
+            -d fenix7xpro \
+            -o preview/SolarRings7XPro.prg \
+            -y "$RUNNER_TEMP/preview-key.der" -w
+
+      - name: Launch simulator and take screenshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/test-preview.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          "$CONNECT_IQ_HOME/bin/simulator" >preview/simulator.log 2>&1 &
+          simulator_pid=$!
+          cleanup() {
+            kill "$simulator_pid" 2>/dev/null || true
+            wait "$simulator_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if ! kill -0 "$simulator_pid" 2>/dev/null; then
+              echo 'Simulator terminated before it became ready.' >&2
+              exit 1
+            fi
+            if (: > /dev/tcp/127.0.0.1/1234) 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            echo 'Simulator did not start within 30 seconds.' >&2
+            exit 1
+          fi
+
+          timeout 40s "$CONNECT_IQ_HOME/bin/monkeydo" \
+            preview/SolarRings7XPro.prg fenix7xpro \
+            >preview/monkeydo.log 2>&1 &
+          monkeydo_pid=$!
+          sleep 12
+
+          # Screenshot of the virtual monitor, where the Garmin simulator runs.
+          import -display "$DISPLAY" -window root preview/simulator-screen.png
+          test -s preview/simulator-screen.png
+          echo 'Screenshot captured: preview/simulator-screen.png'
+          echo 'Simulator log:'
+          cat preview/monkeydo.log || true
+
+          kill "$monkeydo_pid" 2>/dev/null || true
+          wait "$monkeydo_pid" 2>/dev/null || true
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/test-preview.sh"
+          timeout --signal=TERM --kill-after=10s 150s \
+            xvfb-run -a -s '-screen 0 1280x1024x24' \
+            dbus-run-session -- bash "$RUNNER_TEMP/test-preview.sh"
+
+      - name: Upload screenshot and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings7X-simulator-preview
+          path: preview/
+          if-no-files-found: warn
+          retention-days: 14
