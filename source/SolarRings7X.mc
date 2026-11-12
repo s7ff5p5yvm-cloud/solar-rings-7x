@@ -129,21 +129,20 @@ class SolarRings7XFace extends Ui.WatchFace {
         if (id == 0) { return; }
         var item = readField(id, info, w);
         if (id == 34) {
-            drawMoon(dc, 140, 90);
-            drawFitted(dc, 140, 102, item[1], 50,
-                       Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_LT_GRAY);
+            // Moon phase is conveyed by its glyph; no label under it.
+            // The earlier label overlapped the divider and ring row.
+            drawMoon(dc, 140, 96);
             return;
         }
-        drawFitted(dc, 140, 83, item[0], 49,
-                   Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_YELLOW);
-        drawFitted(dc, 140, 99, item[1], 50,
+        // One short value only, within the central 46 px slot.
+        drawFitted(dc, 140, 92, item[1], 46,
                    Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
     }
 
     // Four compact 2x2 rings. The center belongs to the *value*,
     // not to text labels; the top of each circle has a metric icon.
     function ring(dc, cx, cy, color, ratio) {
-        var radius = 23;
+        var radius = 21;
         dc.setPenWidth(4);
         dc.setColor(0x484848, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(cx, cy, radius);
@@ -248,7 +247,7 @@ class SolarRings7XFace extends Ui.WatchFace {
         var item = readField(fieldId, info, w);
         var color = ringPalette(paletteCode);
         ring(dc, cx, cy, color, item[2]);
-        metricIcon(dc, cx, cy - 13, fieldId, color, item[0]);
+        metricIcon(dc, cx, cy - 12, fieldId, color, item[0]);
         var value = item[1];
         if (isDigits(value)) {
             drawDigitalValue(dc, cx, cy, value);
@@ -258,19 +257,22 @@ class SolarRings7XFace extends Ui.WatchFace {
         }
     }
 
+    // Three dedicated footer lanes: no text in the ring zone.
+    // A single weather row replaces two overlapping large font rows.
     function weatherFooter(dc, id, info, w) {
         if (id == 0) { return; }
         var item = readField(id, info, w);
         if (id == 16) {
-            drawCloud(dc, 82, 227);
-            drawFitted(dc, 155, 217, item[1], 105,
-                       Gfx.FONT_SMALL, Gfx.FONT_TINY, Gfx.COLOR_WHITE);
-            drawFitted(dc, 155, 235, conditionText(w), 126,
+            drawCloud(dc, 63, 230);
+            drawFitted(dc, 125, 220, item[1], 63,
+                       Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
+            var caption = conditionText(w);
+            drawFitted(dc, 197, 223, caption, 82,
                        Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_LT_GRAY);
         } else {
-            drawFitted(dc, 82, 219, item[0], 70,
+            drawFitted(dc, 85, 225, item[0], 78,
                        Gfx.FONT_XTINY, Gfx.FONT_XTINY, 0x00FFFF);
-            drawFitted(dc, 174, 218, item[1], 99,
+            drawFitted(dc, 188, 221, item[1], 97,
                        Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
         }
     }
@@ -278,14 +280,13 @@ class SolarRings7XFace extends Ui.WatchFace {
     function batteryFooter(dc, id, info, w) {
         if (id == 0) { return; }
         var item = readField(id, info, w);
-        var label = (id == 17) ? item[1] : item[0] + " " + item[1];
         if (id == 17) {
-            // Tiny bolt to the left of the battery percentage.
-            drawBolt(dc, 120, 253);
-            drawFitted(dc, 151, 245, label, 50,
+            // Separate baseline; the original large font ended below the face.
+            drawBolt(dc, 115, 259);
+            drawFitted(dc, 157, 251, item[1], 64,
                        Gfx.FONT_TINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
         } else {
-            drawFitted(dc, 140, 245, label, 104,
+            drawFitted(dc, 140, 252, item[0] + " " + item[1], 140,
                        Gfx.FONT_XTINY, Gfx.FONT_XTINY, Gfx.COLOR_WHITE);
         }
     }
@@ -306,14 +307,15 @@ class SolarRings7XFace extends Ui.WatchFace {
 
         // Pixel areas (280x280): circles top 115..161 and bottom 167..213.
         // Three separate footer lines start at 217, 235 and 245.
-        ringData(dc, 89, 138, setting("ring1", 1), setting("ringColor1", 0), monitor, w);
-        ringData(dc, 191, 138, setting("ring2", 2), setting("ringColor2", 1), monitor, w);
-        ringData(dc, 89, 190, setting("ring3", 3), setting("ringColor3", 6), monitor, w);
-        ringData(dc, 191, 190, setting("ring4", 4), setting("ringColor4", 3), monitor, w);
+        ringData(dc, 89, 144, setting("ring1", 1), setting("ringColor1", 0), monitor, w);
+        ringData(dc, 191, 144, setting("ring2", 2), setting("ringColor2", 1), monitor, w);
+        ringData(dc, 89, 194, setting("ring3", 3), setting("ringColor3", 6), monitor, w);
+        ringData(dc, 191, 194, setting("ring4", 4), setting("ringColor4", 3), monitor, w);
 
-        // Compact footer: temperature, conditions and battery never share a baseline.
+        separator(dc, 47, 233, 218);
+        // Weather on row 1, watch battery on row 2; fixed vertical lanes.
         weatherFooter(dc, setting("bottomMain", 16), monitor, w);
         batteryFooter(dc, setting("bottomMini", 17), monitor, w);
-        if (_storm.warning()) { drawBolt(dc, 231, 227); }
+        if (_storm.warning()) { drawBolt(dc, 250, 229); }
     }
 }
