@@ -43,7 +43,7 @@ function ringPalette(code) {
     if (code == 3) { return Gfx.COLOR_ORANGE; }
     if (code == 4) { return Gfx.COLOR_YELLOW; }
     if (code == 5) { return Gfx.COLOR_WHITE; }
-    return Gfx.COLOR_CYAN;
+    return 0x00FFFF;
 }
 
 function addSetting(menu, title, key, fallback) {
