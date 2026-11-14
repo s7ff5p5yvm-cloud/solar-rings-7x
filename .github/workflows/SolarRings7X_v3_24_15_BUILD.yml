@@ -22,8 +22,8 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import zipfile
-          archive=Path('SolarRings7X_v3_24_13_SOURCE.zip')
-          assert archive.is_file(), 'Place SolarRings7X_v3_24_13_SOURCE.zip at repository root'
+          archive=Path('SolarRings7X_v3_24_15_SOURCE.zip')
+          assert archive.is_file(), 'Place SolarRings7X_v3_24_15_SOURCE.zip at repository root'
           dest=Path('SolarRings7X_weather')
           dest.mkdir(exist_ok=True)
           with zipfile.ZipFile(archive) as z:
@@ -36,7 +36,10 @@ jobs:
                   target.parent.mkdir(parents=True, exist_ok=True)
                   target.write_bytes(z.read(entry))
           assert (dest/'manifest.xml').is_file()
-          assert b'tempLayoutTestV32412' in (dest/'resources/settings/settings.xml').read_bytes(), 'Temperature test setting missing from source ZIP'
+          assert b'capsuleStepsModeV39' in (dest/'resources/settings/settings.xml').read_bytes(), 'Steps mode missing'
+          face=(dest/'source/SolarRings7X.mc').read_text()
+          assert 'drawWeatherAge(dc, w);' in face, 'Weather age not in rendered face'
+          assert 'var remainingSteps = monitor.stepGoal - doneSteps;' in face, 'Signed step difference missing'
           PY
 
       - name: Verify project and preserved settings
@@ -82,16 +85,16 @@ jobs:
           set -euo pipefail
           cd SolarRings7X_weather
           mkdir -p dist
-          monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v32414.prg -y "$RUNNER_TEMP/key.der" -w
-          monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v32414.iq -y "$RUNNER_TEMP/key.der" -w
-          test -s dist/SolarRings7X_v32414.prg
-          test -s dist/SolarRings7X_v32414.iq
+          monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v32415.prg -y "$RUNNER_TEMP/key.der" -w
+          monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v32415.iq -y "$RUNNER_TEMP/key.der" -w
+          test -s dist/SolarRings7X_v32415.prg
+          test -s dist/SolarRings7X_v32415.iq
 
       - name: Upload Garmin Weather Alerts build
         uses: actions/upload-artifact@v4
         with:
-          name: SolarRings7X_weather_v32414
+          name: SolarRings7X_weather_v32415
           path: |
-            SolarRings7X_weather/dist/SolarRings7X_v32414.prg
-            SolarRings7X_weather/dist/SolarRings7X_v32414.iq
+            SolarRings7X_weather/dist/SolarRings7X_v32415.prg
+            SolarRings7X_weather/dist/SolarRings7X_v32415.iq
           if-no-files-found: error
