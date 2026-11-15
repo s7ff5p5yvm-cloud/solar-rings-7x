@@ -1,91 +1,100 @@
 using Toybox.SensorHistory as History;
 using Toybox.Time as Time;
 
-// Conservative storm *indicator*, NOT a weather forecast and NOT a system alert.
-// Sensor altitude is barometric, so atmospheric changes can also move it.
-// To avoid false positives while climbing/descending, we SUPPRESS alerts if
-// altitude varied significantly or when required history is not available.
+// Barometric pressure TENDENCY indicator. NOT a certified weather warning.
+// Two independent windows: 1 hour (optional early warning) and 3 hours.
+// Elevation derived from barometric pressure can also drift during weather;
+// filtering it reduces movement-induced false alarms but may hide genuine
+// pressure changes. Never treat this indicator as a primary storm warning.
 class StormGuard {
     var _lastCheck;
-    var _lastWarning;
+    var _lastResult;
 
     function initialize() {
         _lastCheck = 0;
-        _lastWarning = false;
+        _lastResult = false;
     }
 
     function warning() {
-        if (!setting("alertOn", false)) { return false; }
+        if (!srSetting("stormOnV3", false)) { return false; }
         var now = Time.now().value();
-        if (_lastCheck != 0 && now - _lastCheck < 300) { return _lastWarning; }
+        if (_lastCheck != 0 && now - _lastCheck < 300) { return _lastResult; }
         _lastCheck = now;
-        _lastWarning = evaluate();
-        return _lastWarning;
+        _lastResult = evaluate();
+        return _lastResult;
     }
 
     function evaluate() {
+        // 1h alert is independently enabled; insufficient data fails closed.
+        if (srSetting("stormFastV310", true) &&
+            pressureTrend(3600, 3000, srSetting("stormFastDropV310", 2))) {
+            return true;
+        }
+        return pressureTrend(10800, 9000, srSetting("stormDropV3", 4));
+    }
+
+    function pressureTrend(windowSeconds, minimumSeconds, thresholdHpa) {
         try {
             var now = Time.now().value();
-            var readings = History.getPressureHistory({
-                :period => new Time.Duration(10800),
+            var iter = History.getPressureHistory({
+                :period => new Time.Duration(windowSeconds),
                 :order => History.ORDER_NEWEST_FIRST
             });
-            var sample = readings.next();
-            var newestTime = null;
-            var oldestTime = null;
-            var newPa = 0.0;
-            var oldPa = 0.0;
-            var count = 0;
-
-            while (sample != null && count < 400) {
-                if (sample.data != null) {
-                    if (newestTime == null) {
-                        newestTime = sample.when.value();
-                        newPa = sample.data.toFloat();
+            if (iter == null) { return false; }
+            var sample = iter.next();
+            var newestPa = null;
+            var oldestPa = null;
+            var newestAt = null;
+            var oldestAt = null;
+            var n = 0;
+            while (sample != null && n < 400) {
+                if (sample.data != null && sample.when != null) {
+                    if (newestPa == null) {
+                        newestPa = sample.data.toFloat();
+                        newestAt = sample.when.value();
                     }
-                    oldestTime = sample.when.value();
-                    oldPa = sample.data.toFloat();
-                    count++;
+                    oldestPa = sample.data.toFloat();
+                    oldestAt = sample.when.value();
+                    n++;
                 }
-                sample = readings.next();
+                sample = iter.next();
             }
-            // At least 2.5 h of fresh pressure history, not a 10-minute spike.
-            if (count < 5 || newestTime == null || oldestTime == null) { return false; }
-            if ((now - newestTime) > 1200) { return false; }
-            if ((newestTime - oldestTime) < 9000) { return false; }
-            var dropHpa = (oldPa - newPa) / 100.0;
-            if (dropHpa < setting("alertDrop", 4)) { return false; }
+            if (n < 5 || newestAt == null || oldestAt == null) { return false; }
+            if (now - newestAt > 900 || newestAt - oldestAt < minimumSeconds) { return false; }
+            // Pressure samples are in Pa. Positive => pressure is falling.
+            var dropHpa = (oldestPa - newestPa) / 100.0;
+            if (dropHpa < thresholdHpa) { return false; }
+            return stableElevation(windowSeconds, minimumSeconds, now);
+        } catch (e) { return false; }
+    }
 
-            var alts = History.getElevationHistory({
-                :period => new Time.Duration(10800),
+    function stableElevation(windowSeconds, minimumSeconds, now) {
+        try {
+            var iter = History.getElevationHistory({
+                :period => new Time.Duration(windowSeconds),
                 :order => History.ORDER_NEWEST_FIRST
             });
-            var altitude = alts.next();
+            if (iter == null) { return false; }
+            var item = iter.next();
             var minAlt = 100000.0;
             var maxAlt = -100000.0;
-            var altCount = 0;
-            var newestAltTime = null;
-            var oldestAltTime = null;
-            while (altitude != null && altCount < 400) {
-                if (altitude.data != null) {
-                    var alt = altitude.data.toFloat();
-                    if (alt < minAlt) { minAlt = alt; }
-                    if (alt > maxAlt) { maxAlt = alt; }
-                    if (newestAltTime == null) { newestAltTime = altitude.when.value(); }
-                    oldestAltTime = altitude.when.value();
-                    altCount++;
+            var newestAt = null;
+            var oldestAt = null;
+            var n = 0;
+            while (item != null && n < 400) {
+                if (item.data != null && item.when != null) {
+                    var altitude = item.data.toFloat();
+                    if (altitude < minAlt) { minAlt = altitude; }
+                    if (altitude > maxAlt) { maxAlt = altitude; }
+                    if (newestAt == null) { newestAt = item.when.value(); }
+                    oldestAt = item.when.value();
+                    n++;
                 }
-                altitude = alts.next();
+                item = iter.next();
             }
-            // Fail closed if altitude history cannot verify a stable location.
-            if (altCount < 5 || newestAltTime == null || oldestAltTime == null) { return false; }
-            if ((now - newestAltTime) > 1200) { return false; }
-            if ((newestAltTime - oldestAltTime) < 9000) { return false; }
-            if ((maxAlt - minAlt) >= setting("altFilter", 20)) { return false; }
-            return true;
-        } catch (e) {
-            // Permission denied, sensor not available, reset history, etc.
-            return false;
-        }
+            if (n < 5 || newestAt == null || oldestAt == null) { return false; }
+            if (now - newestAt > 900 || newestAt - oldestAt < minimumSeconds) { return false; }
+            return maxAlt - minAlt < srSetting("stormAltitudeV3", 20);
+        } catch (e) { return false; }
     }
 }
