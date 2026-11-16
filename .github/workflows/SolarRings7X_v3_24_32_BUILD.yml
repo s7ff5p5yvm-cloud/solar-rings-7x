@@ -1,0 +1,170 @@
+name: Build Solar Rings 7X - Combined Weather Alerts v3.24.32
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Garmin Fenix 7X Pro Solar
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract watch face source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          archive=Path('SolarRings7X_v3_24_32_SOURCE.zip')
+          assert archive.is_file(), 'Place SolarRings7X_v3_24_32_SOURCE.zip at repository root'
+          dest=Path('SolarRings7X_weather')
+          dest.mkdir(exist_ok=True)
+          with zipfile.ZipFile(archive) as z:
+              assert z.testzip() is None
+              for entry in z.infolist():
+                  p=Path(entry.filename)
+                  if entry.is_dir(): continue
+                  if p.is_absolute() or '..' in p.parts: raise ValueError('Invalid ZIP path')
+                  target=dest/p
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(z.read(entry))
+          assert (dest/'manifest.xml').is_file()
+          assert "version=\"3.24.32\"" in (dest/'manifest.xml').read_text(), 'Wrong manifest version'
+          assert "== '3.24.32'" in (dest/'check_version.py').read_text(), 'Wrong version check'
+          assert b'capsuleStepsModeV39' in (dest/'resources/settings/settings.xml').read_bytes(), 'Steps mode missing'
+          face=(dest/'source/SolarRings7X.mc').read_text()
+          assert 'drawWeatherAge(dc, w);' in face, 'Weather age not in rendered face'
+          assert 'System.getDeviceSettings().phoneConnected' in face, 'Phone state missing'
+          assert 'drawPhoneBluetooth(dc);' in face, 'Bluetooth icon not drawn'
+          assert 'dc.drawLine(229, 124, 239, 108);' in face, 'Disconnected slash missing'
+          assert 'remainingMinutes.toString() + "m";' in face, 'Full hours-minutes display missing'
+          assert 'var remainingSteps = monitor.stepGoal - doneSteps;' in face, 'Signed step difference missing'
+          assert 'srSystemStatsForFrame().charging' in face, 'Battery charging status missing'
+          assert 'chargingBatteryIcon(dc, 117, 261, Gfx.COLOR_GREEN)' in face, 'Footer charging symbol missing' 
+          assert 'var requestedFont = vectorFontFor(sizePixels, digits);' in face, 'Optimized text fitting missing'
+          assert 'var _srMoonExtents14 = [' in face, 'New lunar disc lookup missing'
+          assert 'drawLunarDisk(dc, 54, 147, 14)' in face, 'Enlarged Moon missing'
+          assert 'weather.observationLocationPosition.toDegrees()' in face, 'Weather observation coordinates missing'
+          assert 'srWeatherCityFromDegrees(latitude, longitude)' in face, 'Weather city matcher missing'
+          city=(dest/'source/WeatherCity.mc').read_text()
+          assert 'function srWeatherCityFromDegrees(lat, lon)' in city, 'Offline weather city matcher missing'
+          geocode=(dest/'source/WeatherGeocode.mc').read_text()
+          assert 'class SolarRingsGeoService' in geocode and 'makeWebRequest(' in geocode, 'Background geocoding missing'
+          assert 'Background' in (dest/'manifest.xml').read_text(), 'Background permission missing'
+          assert 'Communications' in (dest/'manifest.xml').read_text(), 'Communications permission missing'
+          assert 'function onBackgroundData(data)' in face, 'Background data callback missing'
+          assert 'remoteCityForWeatherPosition(latitude, longitude)' in face, 'Geocoding display integration missing'
+          assert '"KRAKÓW", 50.0647d, 19.9450d' in city, 'Krakow coordinates missing'
+          assert 'if (isTemp) { temperatureMarker(dc, weather, 142, 224); }' in face, 'Thermometer not beside temperature'
+          marker=face.split('function temperatureMarker(dc, w, x, y) {',1)[1].split('function warningCloud(',1)[0]
+          assert 'else { return; }' in marker, 'Temperature threshold missing normal-range return'
+          assert 'Gfx.COLOR_RED' in marker and '0x00CCFF' in marker, 'Both threshold colors required'
+          assert 'Gfx.COLOR_LT_GRAY' not in marker, 'Old permanent gray thermometer unexpectedly present'
+          alerts=face.split('function drawAlertCenter(')[1].split('// Battery footer')[0]
+          assert 'active.add(-2)' not in alerts and 'active.add(-3)' not in alerts, 'Thermometer incorrectly in warning center'
+          assert 'weather.observationLocationName' in face, 'Optional legacy weather location fallback missing' 
+          assert 'drawAlertCenter(dc, w)' in face, 'Alert center missing'
+          assert 'dc.drawLine(127, 134, 127, 159)' in face, 'Lunar separator missing'
+          assert 'function onPartialUpdate(dc)' in face, 'Overflow warning handling missing'
+          assert 'var _srMoonExtents12 = [' in face, 'Legacy lunar lookup missing' 
+          assert 'var _srMoonExtents7 = [' in face, 'Small Moon geometry lookup missing'
+          assert '_ageTextCache = [minutes, ageLabel, ageColor];' in face, 'Weather age formatting cache missing'
+          assert '_clockTextCache = [minuteOfDay, value];' in face, 'Clock text cache missing'
+          assert 'var dayMonthKey = date.month * 32 + date.day;' in face, 'Date text cache missing' 
+          assert 'function getCachedConditions()' in face, 'Cached Garmin weather missing'
+          assert 'var slotKey = x * 512 + top;' in face, 'Measured text memo missing'
+          assert 'function frameField(id, monitor, weather)' in face, 'Per-frame field memo missing'
+          assert 'srSystemStatsForFrame().charging' in face, 'Shared charging snapshot missing'
+          assert 'var high = pixels - 1;' in face, 'Temperature font fitting missing'
+          assert 'srResetSettingsCache();' in face, 'GCM settings cache invalidation missing'
+          assert 'var _srDays =' in face, 'Static day labels missing'
+          assert face.count('Weather.getCurrentConditions()') == 1, 'Redundant Garmin weather reads'
+          fields=(dest/'source/FieldData.mc').read_text()
+          assert 'now - cached[0] < 30' in fields, 'History throttling missing'
+          assert 'nowSeconds - cached[0] < 90' in fields, 'Solar time cache missing'
+          assert 'var _srNextSunEvent = null;' in fields, 'Upcoming solar event cache missing'
+          storm=(dest/'source/StormGuard.mc').read_text()
+          assert 'now - _lastCheck < 300' in storm, '5-minute pressure checks missing'
+          assert storm.count('History.getPressureHistory(') == 1, 'Pressure history should be read once'
+          assert 'stableElevation(3600, 3000, now)' in storm, '1h height check missing'
+          assert 'stableElevation(10800, 9000, now)' in storm, '3h height check missing'
+          moon=(dest/'source/MoonCalendar.mc').read_text()
+          assert 'function srMoonPhaseEpoch(k, full)' in moon, 'Offline lunar calculator missing'
+          assert '_srFullMoonDayCache' in moon, 'Day cache missing'
+          warnings=(dest/'source/GarminWeatherWarnings.mc').read_text()
+          assert 'function allWarnings(current)' in warnings, 'All hazard icons not accessible'
+          assert 'items[i] = fresh ? kind + 32 : kind + 96;' in warnings, 'Combined hazard encoding missing'
+          assert 'dc.fillRectangle(x - 8, y + 11, 16, 2)' in face, 'Cyan underline missing'
+          assert 'var centers = [68, 91, 114];' in face, 'Garmin icons may intrude into StormGuard cell'
+          assert 'drawAlertGlyph(dc, 45, -1);' in face, 'Dedicated pressure icon missing'
+          assert 'function forecastChanceMatches(chance, minimum, explicitCategory)' in warnings, 'Nullable forecast probability fallback missing'
+          assert 'dc.setClip(103, 217, 22, 26)' in face, 'Overflow clip must include cyan underline'
+          assert 'value="14"' in (dest/'resources/settings/settings.xml').read_text(), 'Combined warning preview unavailable' 
+          settings=(dest/'source/Config.mc').read_text()
+          assert 'var _srSettingCache = {};' in settings, 'Settings cache missing'
+          assert '_srSettingCacheSize < 64' in settings, 'Settings cap unexpectedly modified'
+          PY
+
+      - name: Verify project and preserved settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 SolarRings7X_weather/check_version.py
+          python3 -m unittest discover -s SolarRings7X_weather/tests -p 'test_*.py' -v
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root=Path('SolarRings7X_weather')
+          for p in root.rglob('*.xml'):
+              ET.parse(p)
+              print('XML OK:',p)
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Garmin Connect IQ SDK
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.3.0'
+          install-devices: 'true'
+
+      - name: Load signing key from repository secret
+        shell: bash
+        env:
+          GARMIN_RELEASE_KEY: ${{ secrets.CONNECTIQ_DEVELOPER_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$GARMIN_RELEASE_KEY" || { echo 'Missing secret CONNECTIQ_DEVELOPER_KEY_BASE64'; exit 1; }
+          printf '%s' "$GARMIN_RELEASE_KEY" | base64 -d > "$RUNNER_TEMP/key.der"
+          chmod 600 "$RUNNER_TEMP/key.der"
+
+      - name: Compile PRG and signed IQ
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_weather
+          mkdir -p dist
+          monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v32432.prg -y "$RUNNER_TEMP/key.der" -w
+          monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v32432.iq -y "$RUNNER_TEMP/key.der" -w
+          test -s dist/SolarRings7X_v32432.prg
+          test -s dist/SolarRings7X_v32432.iq
+
+      - name: Upload Garmin Weather Alerts build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings7X_weather_v32432
+          path: |
+            SolarRings7X_weather/dist/SolarRings7X_v32432.prg
+            SolarRings7X_weather/dist/SolarRings7X_v32432.iq
+          if-no-files-found: error
