@@ -1,0 +1,100 @@
+name: Solar Rings 7X v3.26.19 - Build from ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Garmin Fenix 7X Pro Solar (OWM current + minute + 15min + hourly + storm pressure + official alerts)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract watch face source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEXTRACT'
+          from pathlib import Path
+          from zipfile import ZipFile
+          archive = Path('SolarRings7X_v3_26_19_SOURCE.zip')
+          assert archive.is_file(), 'Brak SolarRings7X_v3_26_19_SOURCE.zip w katalogu glownym repozytorium'
+          dest = Path('SolarRings7X_build')
+          dest.mkdir(exist_ok=True)
+          with ZipFile(archive) as z:
+              assert z.testzip() is None, 'Plik ZIP jest uszkodzony'
+              for entry in z.infolist():
+                  path = Path(entry.filename)
+                  if path.is_absolute() or '..' in path.parts or '\\' in entry.filename:
+                      raise ValueError('Niedozwolona sciezka archiwum: '+entry.filename)
+                  if entry.is_dir():
+                      continue
+                  target = dest / path
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(z.read(entry))
+          for f in ('manifest.xml','monkey.jungle','source/SolarRings7X.mc','resources/settings/settings.xml'):
+              assert (dest / f).is_file(), 'Brak pliku projektu: '+f
+          print('Rozpakowano projekt v3.26.19')
+          PYEXTRACT
+
+      - name: Verify version, weather tests and XML
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_build
+          python3 check_version.py
+          python3 -m unittest discover -s tests_provider -p 'test_*.py' -v
+          python3 - <<'PYXML'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for file in Path('.').rglob('*.xml'):
+              ET.parse(file)
+              print('XML OK:',file)
+          PYXML
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Garmin Connect IQ SDK
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.3.0'
+          install-devices: 'true'
+
+      - name: Decode existing Garmin developer key
+        shell: bash
+        env:
+          GARMIN_RELEASE_KEY: ${{ secrets.CONNECTIQ_DEVELOPER_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$GARMIN_RELEASE_KEY" || { echo 'Brak sekretu CONNECTIQ_DEVELOPER_KEY_BASE64'; exit 1; }
+          printf '%s' "$GARMIN_RELEASE_KEY" | base64 -d > "$RUNNER_TEMP/key.der"
+          chmod 600 "$RUNNER_TEMP/key.der"
+
+      - name: Compile both Fenix 7X Pro variants and IQ package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_build
+          mkdir -p dist
+          monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v32619.prg -y "$RUNNER_TEMP/key.der" -w
+          monkeyc -f monkey.jungle -d fenix7xpronowifi -o dist/SolarRings7X_v32619_nowifi.prg -y "$RUNNER_TEMP/key.der" -w
+          monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v32619.iq -y "$RUNNER_TEMP/key.der" -w
+          test -s dist/SolarRings7X_v32619.prg
+          test -s dist/SolarRings7X_v32619_nowifi.prg
+          test -s dist/SolarRings7X_v32619.iq
+
+      - name: Publish build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings7X_v32619
+          path: SolarRings7X_build/dist/*
+          if-no-files-found: error
