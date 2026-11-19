@@ -23,11 +23,11 @@ jobs:
           from pathlib import Path
           from zipfile import ZipFile
           from hashlib import sha256
-          archive = Path('SolarRings7X_v3_26_41_SOURCE.zip')
-          assert archive.is_file(), 'Brak SolarRings7X_v3_26_41_SOURCE.zip w katalogu glownym repozytorium'
+          archive = Path('SolarRings7X_v3_26_42_SOURCE.zip')
+          assert archive.is_file(), 'Brak SolarRings7X_v3_26_42_SOURCE.zip w katalogu glownym repozytorium'
           actual_hash = sha256(archive.read_bytes()).hexdigest()
           expected_hash = '9c3d2e488fe20cba78c687199837ba7a63b8f41f6e13dd340609897a3d6a4723'
-          assert actual_hash == expected_hash, 'BLEDNE ZRODLA: GitHub pobral niepoprawny lub stary plik SOURCE.zip. Wgraj nowa paczke i uruchom NOWY workflow.'
+          assert actual_hash == expected_hash, ('BLEDNE ZRODLA: oczekiwano SHA256 ' + expected_hash + ', pobrano ' + actual_hash + '. Wgraj SOURCE.zip z tej samej paczki co workflow.')
           print('SOURCE SHA256 OK:', actual_hash)
           dest = Path('SolarRings7X_build')
           dest.mkdir(exist_ok=True)
@@ -45,7 +45,7 @@ jobs:
           for f in ('manifest.xml','monkey.jungle','source/SolarRings7X.mc','resources/settings/settings.xml'):
               assert (dest / f).is_file(), 'Brak pliku projektu: '+f
           manifest = (dest / 'manifest.xml').read_text(encoding='utf-8')
-          test_code = (dest / 'tests_provider/test_openmeteo_swap_v32642.py').read_text(encoding='utf-8')
+          test_code = (dest / 'tests_provider/test_openmeteo_swap_v32641.py').read_text(encoding='utf-8')
           assert 'version="3.26.42"' in manifest, 'Manifest nie zawiera wersji 3.26.42'
           assert "self.assertEqual(a.attrib['version'],'3.26.42')" in test_code, 'Nieaktualny test wersji - uzywasz zlego archiwum SOURCE'
           print('Rozpakowano projekt v3.26.42, testy wersji 3.26.42 OK')
