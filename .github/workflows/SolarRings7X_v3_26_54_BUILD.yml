@@ -53,10 +53,10 @@ jobs:
           tree = ET.parse(dest/'resources/settings/settings.xml').getroot()
           modes = next(v for v in tree if v.get('propertyKey')=='@Properties.gwPreviewV332')
           values = [int(x.get('value')) for x in modes.find('settingConfig')]
-          assert values == [0, 15, 21, 22], 'Stare niebezpieczne ekrany TEST pozostaly w menu'
+          assert values == [0, 15, 21, 22, 23], 'Nieoczekiwane stare lub niebezpieczne ekrany TEST pozostaly w menu'
           props = ET.parse(dest/'resources/settings/properties.xml').getroot()
           assert any(x.get('id')=='srOpenKeyV326' for x in props), 'Brakuje klucza OWM w ustawieniach'
-          print('Menu testow OK: 0/15/21/22; klucz OWM zachowany')
+          print('Menu testow OK: 0/15/21/22/23; klucz OWM zachowany')
           PYEXTRACT
 
       - name: Verify version, weather tests and XML
