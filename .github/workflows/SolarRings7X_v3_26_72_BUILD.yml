@@ -1,0 +1,107 @@
+name: "Solar Rings v3.26.72 - Premium MIP - faithful Body Battery icon"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Fenix 7X Pro - Body Battery premium corrected, MIP64, Photon on change, live HR"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract verified v3.26.72 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEXTRACT'
+          from pathlib import Path
+          from zipfile import ZipFile
+          from hashlib import sha256
+          archive = Path('SolarRings7X_v3_26_72_SOURCE.zip')
+          assert archive.is_file(), 'Upload SolarRings7X_v3_26_72_SOURCE.zip to repository root'
+          digest = sha256(archive.read_bytes()).hexdigest()
+          assert digest == 'd6e981be0f1265fe762ea72daee9464b8f0e0ee7b03853354e17cd6acf39ef6a', 'SOURCE ZIP mismatch - upload the matching 3.26.72 source archive'
+          dest=Path('SolarRings7X_build'); dest.mkdir(exist_ok=True)
+          with ZipFile(archive) as z:
+              assert z.testzip() is None, 'Source archive corrupt'
+              for item in z.infolist():
+                  path=Path(item.filename)
+                  assert not path.is_absolute() and '..' not in path.parts and '\\' not in item.filename
+                  if item.is_dir(): continue
+                  target=dest/path;target.parent.mkdir(exist_ok=True,parents=True)
+                  target.write_bytes(z.read(item))
+          manifest=(dest/'manifest.xml').read_text(encoding='utf-8')
+          assert 'version="3.26.72"' in manifest
+          assert '<iq:uses-permission id="Positioning"/>' in manifest
+          assert '<iq:uses-permission id="Background"/>' in manifest
+          assert '<iq:uses-permission id="Communications"/>' in manifest
+          assert not (dest/'source/GarminWeatherWarnings.mc').exists()
+          main=(dest/'source/SolarRings7X.mc').read_text()
+          service=(dest/'source/SolarRingsGarminService.mc').read_text()
+          assert 'drawCurrentWeatherIcon(dc, w)' in main
+          assert 'Weather.getHourlyForecast(' not in main+service
+          assert 'srPhotonScheduleIfNeeded()' in main
+          print('Source verified:',digest)
+          PYEXTRACT
+
+      - name: Run static tests and validate XML
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_build
+          python3 -m unittest discover -s tests_provider -p 'test_*.py' -v
+          python3 - <<'PYXML'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for f in Path('.').rglob('*.xml'):
+              ET.parse(f)
+              print('XML OK', f)
+          PYXML
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Garmin Connect IQ SDK
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.3.0'
+          install-devices: 'true'
+
+      - name: Decode Garmin developer signing key
+        shell: bash
+        env:
+          GARMIN_RELEASE_KEY: ${{ secrets.CONNECTIQ_DEVELOPER_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$GARMIN_RELEASE_KEY" || { echo 'Missing CONNECTIQ_DEVELOPER_KEY_BASE64'; exit 1; }
+          printf '%s' "$GARMIN_RELEASE_KEY" | base64 -d > "$RUNNER_TEMP/key.der"
+          chmod 600 "$RUNNER_TEMP/key.der"
+
+      - name: Compile Fenix 7X Pro PRG and Store IQ
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_build
+          mkdir -p dist
+          monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v32672.prg -y "$RUNNER_TEMP/key.der" -w
+          monkeyc -f monkey.jungle -d fenix7xpronowifi -o dist/SolarRings7X_v32672_nowifi.prg -y "$RUNNER_TEMP/key.der" -w
+          monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v32672.iq -y "$RUNNER_TEMP/key.der" -w
+          test -s dist/SolarRings7X_v32672.prg
+          test -s dist/SolarRings7X_v32672_nowifi.prg
+          test -s dist/SolarRings7X_v32672.iq
+
+      - name: Upload finished binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings7X_v32672_PremiumMIP72
+          path: SolarRings7X_build/dist/*
+          if-no-files-found: error
