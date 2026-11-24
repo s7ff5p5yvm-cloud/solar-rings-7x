@@ -1,0 +1,78 @@
+name: Solar Rings 3.26.81 - static diagnostics
+on:
+  workflow_dispatch:
+  push:
+    branches: [diagnostyka-v32681]
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and analyze stable source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, json, hashlib, zipfile, pathlib, collections, os
+          zip_path=pathlib.Path('SolarRings7X_v3_26_81_SOURCE.zip')
+          expected='c68178fce11c117a7bc8b97ec2e248a167e044e683f160477c70786a2ab7cc16'
+          assert zip_path.is_file(), 'Missing source archive for v3.26.81'
+          assert hashlib.sha256(zip_path.read_bytes()).hexdigest()==expected, 'Unexpected source archive hash'
+          patterns={
+            'Render/update': r'\b(?:onUpdate|onPartialUpdate|requestUpdate|drawBitmap|drawText)\s*\(',
+            'Weather': r'\b(?:Weather\.|getCurrentConditions|getHourlyForecast|getDailyForecast)',
+            'Photon/location': r'\b(?:photon|Position\.getInfo|Activity\.getActivityInfo)',
+            'Network requests': r'\b(?:makeWebRequest|makeImageRequest)\s*\(',
+            'Allocation/formatting': r'\bnew\s+[A-Za-z_]\w*|\b(?:format|toString)\s*\(',
+            'Timers': r'\b(?:Timer\.Timer|startTimer|stopTimer|setTimer)\b',
+          }
+          matches=collections.defaultdict(list)
+          sources=[]
+          with zipfile.ZipFile(zip_path) as z:
+            assert z.testzip() is None, 'Corrupt ZIP archive'
+            filenames=z.namelist()
+            assert any(n.endswith('manifest.xml') for n in filenames), 'Missing manifest.xml'
+            for n in filenames:
+              path=pathlib.PurePosixPath(n)
+              assert not path.is_absolute() and '..' not in path.parts and '\\' not in n, 'Unsafe ZIP path'
+              if n.endswith('.mc'):
+                txt=z.read(n).decode('utf-8',errors='replace')
+                sources.append((n,txt))
+                for number,line in enumerate(txt.splitlines(),1):
+                  line=line.split('//',1)[0]
+                  for label,pattern in patterns.items():
+                    if re.search(pattern,line,re.I): matches[label].append(f'{n}:{number}')
+          assert sources, 'No Monkey C source files in archive'
+          out=pathlib.Path('diagnostics');out.mkdir(exist_ok=True)
+          summary={
+             'version':'3.26.81',
+             'type':'static regex-based heuristic, NOT a runtime profiler',
+             'monkey_c_files':len(sources),
+             'source_lines':sum(len(txt.splitlines()) for _,txt in sources),
+             'counts':{label:len(matches[label]) for label in patterns},
+             'locations':{label:matches[label] for label in patterns},
+          }
+          (out/'findings.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False),encoding='utf-8')
+          lines=['# Solar Rings v3.26.81 — static diagnostic report','',
+            'This is a static pattern scan. Counts are source-code occurrences, not runtime calls, CPU load or battery consumption.','',
+            f"Files: {summary['monkey_c_files']}; lines: {summary['source_lines']}",'','## Candidate areas']
+          for label in patterns:
+            lines.append(f"- **{label}**: {len(matches[label])} matching source lines")
+          for label in patterns:
+            lines.extend(['',f'## {label}'])
+            lines.extend('- '+where for where in matches[label][:60])
+            if len(matches[label])>60:lines.append(f'- (+{len(matches[label])-60} more in findings.json)')
+          lines.extend(['','Next: manually inspect call sites and compare actual battery drain on the watch.'])
+          report='\n'.join(lines)+'\n'
+          (out/'report.md').write_text(report,encoding='utf-8')
+          print(report[:10000])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write('\n'.join(lines[:16])+'\n')
+          PY
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings_v32681_diagnostyka
+          path: diagnostics/
+          if-no-files-found: error
