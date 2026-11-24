@@ -119,8 +119,8 @@ jobs:
           test -s dist/SolarRings7X_v32684_nowifi.prg
           test -s dist/SolarRings7X_v32684.iq
           echo 'Optimized output sizes (bytes):'
-          wc -c dist/*
-          sha256sum dist/*
+          wc -c dist/*.prg dist/*.iq
+          sha256sum dist/*.prg dist/*.iq
 
       - name: Upload compiled files
         uses: actions/upload-artifact@v4
