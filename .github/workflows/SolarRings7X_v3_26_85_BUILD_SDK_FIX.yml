@@ -1,0 +1,146 @@
+name: "Solar Rings v3.26.85 - moon shortcut SDK Boolean fix"
+
+on:
+  push:
+    branches: [diagnostyka-v32681]
+    paths:
+      - "SolarRings7X_v3_26_85_SOURCE_SDK_FIX.zip"
+      - ".github/workflows/SolarRings7X_v3_26_85_BUILD_SDK_FIX.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Fenix 7X Pro - v3.26.85 build and regression tests"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+
+      - name: Verify and extract v3.26.85 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEXTRACT'
+          from pathlib import Path
+          from zipfile import ZipFile
+          from hashlib import sha256
+          archive = Path('SolarRings7X_v3_26_85_SOURCE_SDK_FIX.zip')
+          assert archive.is_file(), 'Upload SolarRings7X_v3_26_85_SOURCE_SDK_FIX.zip to the repository root on diagnostyka-v32681'
+          expected = 'add56a503bd12f1ea8b7ed359d15fe94365acd16bcb324eb042187e33d1a8303'
+          digest = sha256(archive.read_bytes()).hexdigest()
+          assert digest == expected, 'Source ZIP hash mismatch: aborting before build'
+          dest = Path('SolarRings7X_v32685_build')
+          dest.mkdir(exist_ok=True)
+          with ZipFile(archive) as zipped:
+              assert zipped.testzip() is None, 'Source ZIP corrupted'
+              for item in zipped.infolist():
+                  name = Path(item.filename)
+                  assert not name.is_absolute() and '..' not in name.parts and '\\' not in item.filename
+                  if item.is_dir():
+                      continue
+                  target = dest / name
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(zipped.read(item))
+          manifest = (dest / 'manifest.xml').read_text(encoding='utf-8')
+          assert 'version="3.26.85"' in manifest
+          assert 'ComplicationSubscriber' in manifest
+          assert (dest/'source/SolarRingsCompassShortcut.mc').is_file()
+          shortcut = (dest/'source/SolarRingsCompassShortcut.mc').read_text()
+          assert 'using Toybox.Lang as Lang;' in shortcut
+          assert 'function onPress(event as Ui.ClickEvent) as Lang.Boolean' in shortcut
+          assert 'new SolarRingsCompassShortcut()' in (dest/'source/SolarRings7X.mc').read_text(), 'Wrong manifest version'
+          assert 'id="D1F8E1A4B7FC45BD91E8F0A0959041BF"' in manifest, 'App ID changed'
+          assert '<iq:uses-permission id="Positioning"/>' in manifest
+          assert '<iq:uses-permission id="Background"/>' in manifest
+          assert '<iq:uses-permission id="Communications"/>' in manifest
+          main = (dest / 'source/SolarRings7X.mc').read_text(encoding='utf-8')
+          assert '_clockTextCache = [minuteOfDay, value, hourText, minuteText];' in main
+          assert 'drawCurrentWeatherIcon(dc, w)' in main
+          assert 'srPhotonScheduleIfNeeded()' in main
+          assert 'Position.getInfo()' in main
+          assert 'srRememberLocalCalendar(_cachedCalendar, minuteKey);' in main
+          assert 'var _moonRowCache;' in main
+          assert 'var calendarNow = Time.now();' in main
+          assert '_srLocalCalendarCache = null;' in main
+          field = (dest / 'source/FieldData.mc').read_text(encoding='utf-8')
+          moon = (dest / 'source/MoonCalendar.mc').read_text(encoding='utf-8')
+          config = (dest / 'source/Config.mc').read_text(encoding='utf-8')
+          service = (dest / 'source/SolarRingsGarminService.mc').read_text(encoding='utf-8')
+          assert 'srLocalCalendarInfo(now)' in field
+          assert 'cached[2] == local.year' in moon
+          assert 'var fixed = null;' in config
+          assert 'var hr = activity.currentHeartRate;' in field
+          assert 'version="3.26.85"' in manifest
+          assert 'ComplicationSubscriber' in manifest
+          assert (dest/'source/SolarRingsCompassShortcut.mc').is_file()
+          shortcut = (dest/'source/SolarRingsCompassShortcut.mc').read_text()
+          assert 'using Toybox.Lang as Lang;' in shortcut
+          assert 'function onPress(event as Ui.ClickEvent) as Lang.Boolean' in shortcut
+          assert 'new SolarRingsCompassShortcut()' in (dest/'source/SolarRings7X.mc').read_text()
+          assert 'Weather.getHourlyForecast(' not in main+field+service
+          print('Verified source v3.26.85 SHA-256:', digest)
+          PYEXTRACT
+
+      - name: Run all regression tests including Monkey C type fix and validate XML
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_v32685_build
+          python3 -m unittest discover -s tests_provider -p 'test_*.py' -v
+          python3 - <<'PYXML'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for file in Path('.').rglob('*.xml'):
+              ET.parse(file)
+              print('XML OK', file)
+          PYXML
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Garmin Connect IQ SDK
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.3.0'
+          install-devices: 'true'
+
+      - name: Decode existing Garmin signing key
+        shell: bash
+        env:
+          GARMIN_RELEASE_KEY: ${{ secrets.CONNECTIQ_DEVELOPER_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$GARMIN_RELEASE_KEY" || { echo 'Missing CONNECTIQ_DEVELOPER_KEY_BASE64'; exit 1; }
+          printf '%s' "$GARMIN_RELEASE_KEY" | base64 -d > "$RUNNER_TEMP/key.der"
+          chmod 600 "$RUNNER_TEMP/key.der"
+
+      - name: Compile optimized test PRG and Store IQ
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd SolarRings7X_v32685_build
+          mkdir -p dist
+          monkeyc -f monkey.jungle -d fenix7xpro -o dist/SolarRings7X_v32685.prg -y "$RUNNER_TEMP/key.der" -w -O 2
+          monkeyc -f monkey.jungle -d fenix7xpronowifi -o dist/SolarRings7X_v32685_nowifi.prg -y "$RUNNER_TEMP/key.der" -w -O 2
+          monkeyc -e -f monkey.jungle -o dist/SolarRings7X_v32685.iq -y "$RUNNER_TEMP/key.der" -w -O 2
+          test -s dist/SolarRings7X_v32685.prg
+          test -s dist/SolarRings7X_v32685_nowifi.prg
+          test -s dist/SolarRings7X_v32685.iq
+          echo 'Optimized output sizes (bytes):'
+          wc -c dist/*.prg dist/*.iq
+          sha256sum dist/*.prg dist/*.iq
+
+      - name: Upload compiled files
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarRings7X_v32685_MOON_SDK_FIX
+          path: SolarRings7X_v32685_build/dist/*
+          if-no-files-found: error
+          retention-days: 14
