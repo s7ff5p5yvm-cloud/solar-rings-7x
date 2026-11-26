@@ -1,0 +1,127 @@
+name: Compass Pro 7X v1 - build and tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify and extract independent Compass Pro source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          from zipfile import ZipFile
+          archive = Path('CompassPro7X_v1_SOURCE.zip')
+          expected = 'ee5adc75643e4fb7fbad09ad7693ee3ec56d74d33d3f497bd9519c395e255b6b'
+          assert archive.is_file(), 'Upload CompassPro7X_v1_SOURCE.zip to repository root'
+          actual = sha256(archive.read_bytes()).hexdigest()
+          assert actual == expected, f'Unexpected source hash: {actual}'
+          dest = Path('CompassPro7X_build')
+          dest.mkdir(exist_ok=True)
+          with ZipFile(archive) as z:
+              assert z.testzip() is None, 'Damaged source ZIP'
+              for info in z.infolist():
+                  path = Path(info.filename)
+                  assert not path.is_absolute() and '..' not in path.parts and '\\' not in info.filename, 'Unsafe zip entry'
+                  if info.is_dir(): continue
+                  target = dest / path
+                  target.parent.mkdir(exist_ok=True, parents=True)
+                  target.write_bytes(z.read(info))
+          manifest = (dest/'manifest.xml').read_text(encoding='utf-8')
+          assert 'type="watch-app"' in manifest
+          assert 'entry="CompassProApp"' in manifest
+          assert 'version="1.0.0"' in manifest
+          assert 'id="93F847268B3845A49991C28B7E590E2A"' in manifest
+          assert 'D1F8E1A4B7FC45BD91E8F0A0959041BF' not in manifest
+          print('Verified source archive SHA-256:', actual)
+          PY
+
+      - name: Regression tests and XML validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd CompassPro7X_build
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for path in Path('.').rglob('*.xml'):
+              ET.parse(path)
+              print('XML OK:', path)
+          PY
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Garmin Connect IQ SDK
+        uses: DuckSoft/setup-connectiq-actions@v1
+        with:
+          sdk-version: '9.3.0'
+          install-devices: 'true'
+
+      - name: Prepare signing key (temporary unless saved release key exists)
+        id: signing
+        shell: bash
+        env:
+          RELEASE_KEY_B64: ${{ secrets.CONNECTIQ_DEVELOPER_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RELEASE_KEY_B64" ]; then
+            printf '%s' "$RELEASE_KEY_B64" | base64 -d > "$RUNNER_TEMP/compass.der"
+            echo 'release=true' >> "$GITHUB_OUTPUT"
+            echo 'Signing with persistent developer key'
+          else
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$RUNNER_TEMP/compass.pem" 2>/dev/null
+            openssl pkcs8 -topk8 -inform PEM -outform DER -in "$RUNNER_TEMP/compass.pem" -out "$RUNNER_TEMP/compass.der" -nocrypt
+            echo 'release=false' >> "$GITHUB_OUTPUT"
+            echo 'Temporary TEST key; do not use for Connect IQ Store publication or future update compatibility'
+          fi
+          chmod 600 "$RUNNER_TEMP/compass.der"
+
+      - name: Compile two device variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd CompassPro7X_build
+          mkdir -p dist
+          monkeyc -f monkey.jungle -d fenix7xpro -o dist/CompassPro7X_fenix7xpro.prg -y "$RUNNER_TEMP/compass.der" -w -O 2
+          monkeyc -f monkey.jungle -d fenix7xpronowifi -o dist/CompassPro7X_fenix7xpronowifi.prg -y "$RUNNER_TEMP/compass.der" -w -O 2
+          test -s dist/CompassPro7X_fenix7xpro.prg
+          test -s dist/CompassPro7X_fenix7xpronowifi.prg
+          wc -c dist/*.prg
+          sha256sum dist/*.prg
+
+      - name: Export Connect IQ Store package (release key required)
+        if: steps.signing.outputs.release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd CompassPro7X_build
+          monkeyc -e -f monkey.jungle -o dist/CompassPro7X_v1.iq -y "$RUNNER_TEMP/compass.der" -w -O 2
+          test -s dist/CompassPro7X_v1.iq
+
+      - name: Upload compiled files
+        uses: actions/upload-artifact@v4
+        with:
+          name: CompassPro7X_v1_build
+          path: |
+            CompassPro7X_build/dist/*.prg
+            CompassPro7X_build/dist/*.iq
+          if-no-files-found: error
+          retention-days: 30
