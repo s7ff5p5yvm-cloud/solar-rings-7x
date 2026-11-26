@@ -1,4 +1,4 @@
-name: Compass Pro 7X v1 - build and tests
+name: Compass Pro 7X v1 - icon fix and regression tests
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
           from hashlib import sha256
           from zipfile import ZipFile
           archive = Path('CompassPro7X_v1_SOURCE.zip')
-          expected = 'ee5adc75643e4fb7fbad09ad7693ee3ec56d74d33d3f497bd9519c395e255b6b'
+          expected = '5cb2151675ae541af9ec1d4c1d1d3e0eacfc9a4e0b2a38590d1b94b010b2c1e5'
           assert archive.is_file(), 'Upload CompassPro7X_v1_SOURCE.zip to repository root'
           actual = sha256(archive.read_bytes()).hexdigest()
           assert actual == expected, f'Unexpected source hash: {actual}'
@@ -43,6 +43,9 @@ jobs:
           manifest = (dest/'manifest.xml').read_text(encoding='utf-8')
           assert 'type="watch-app"' in manifest
           assert 'entry="CompassProApp"' in manifest
+          assert 'launcherIcon="@Drawables.LauncherIcon"' in manifest
+          assert (dest/'resources/drawables/drawables.xml').is_file()
+          assert (dest/'resources/drawables/launcher_icon.png').is_file()
           assert 'version="1.0.0"' in manifest
           assert 'id="93F847268B3845A49991C28B7E590E2A"' in manifest
           assert 'D1F8E1A4B7FC45BD91E8F0A0959041BF' not in manifest
